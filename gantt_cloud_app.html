@@ -120,7 +120,7 @@ button,input,select,textarea{font:inherit}
 <body>
 <div id="app"></div>
 <script type="module">
-const STORAGE_KEYS={supabaseConfig:'cloudGanttSupabaseConfig'};
+const STORAGE_KEYS={supabaseConfig:'cloudGanttSupabaseConfig',uiState:'cloudGanttUiState'};
 const EMBEDDED_SUPABASE_CONFIG={
   url:'https://oembxcnvmqgtaczlydnn.supabase.co',
   key:'sb_publishable_r2RhVcuBgnOr_l7Bcqg24w_5cx40dwF'
@@ -154,7 +154,20 @@ let supabaseConfig=loadSupabaseConfig();
 let supabase=null,session=null,user=null;
 let charts=[],selectedChartId=null,selectedChart=null,selectedRole='owner';
 let projects=cloneDefaultProjects(),tasks=[],filterProjects=new Set(Object.keys(projects));
-let editTask=null,showDeliveryOnly=false,shareRows=[],flashMessage='',loading=true,chartLoading=false,importFile=null;
+let editTask=null,showDeliveryOnly=false,shareRows=[],flashMessage='',loading=true,chartLoading=false,importFile=null,exportPdfPromise=null,chartLoadToken=0,resumeLoadPending=false;
+
+async function resumePlannerView(){
+  if(resumeLoadPending||chartLoading||!supabase||!user)return;
+  resumeLoadPending=true;
+  try{
+    const requestedChartId=requestedChartIdFromLocation();
+    const savedChartId=readUiState().lastChartByUser?.[currentUserEmail()]||null;
+    selectedChartId=requestedChartId||savedChartId||selectedChartId;
+    await loadCharts(true);
+  }finally{
+    resumeLoadPending=false;
+  }
+}
 
 async function init(){
   if(!supabaseConfig.url||!supabaseConfig.key){loading=false;render();return}
@@ -188,7 +201,9 @@ function resetChartState(){
   projects=cloneDefaultProjects();
   tasks=[];
   shareRows=[];
+  showDeliveryOnly=false;
   filterProjects=new Set(Object.keys(projects));
+  clearChartInLocation();
 }
 
 function normalizeProjects(rows){
@@ -221,9 +236,97 @@ function currentUserEmail(){
   return String(user?.email||'').trim().toLowerCase();
 }
 
+function requestedChartIdFromLocation(){
+  const raw=String(window.location.hash||'').replace(/^#/,'').trim();
+  if(!raw)return null;
+  if(raw.startsWith('chart='))return decodeURIComponent(raw.slice(6));
+  return decodeURIComponent(raw);
+}
+
+function rememberChartInLocation(chartId=selectedChartId){
+  if(!chartId)return;
+  const nextHash=`chart=${encodeURIComponent(chartId)}`;
+  if(String(window.location.hash||'').replace(/^#/,'')===nextHash)return;
+  history.replaceState(null,'',`${window.location.pathname}${window.location.search}#${nextHash}`);
+}
+
+function clearChartInLocation(){
+  if(!window.location.hash)return;
+  history.replaceState(null,'',`${window.location.pathname}${window.location.search}`);
+}
+
+function readUiState(){
+  return safeRead(STORAGE_KEYS.uiState,{lastChartByUser:{},chartPrefs:{}});
+}
+
+function writeUiState(nextState){
+  safeWrite(STORAGE_KEYS.uiState,{
+    lastChartByUser:nextState?.lastChartByUser||{},
+    chartPrefs:nextState?.chartPrefs||{}
+  });
+}
+
+function chartUiKey(chartId=selectedChartId){
+  const email=currentUserEmail();
+  return email&&chartId?`${email}::${chartId}`:'';
+}
+
+function rememberSelectedChart(chartId=selectedChartId){
+  const email=currentUserEmail();
+  if(!email||!chartId)return;
+  const uiState=readUiState();
+  uiState.lastChartByUser[email]=chartId;
+  writeUiState(uiState);
+  rememberChartInLocation(chartId);
+}
+
+function rememberChartView(){
+  const key=chartUiKey();
+  if(!key)return;
+  const uiState=readUiState();
+  uiState.chartPrefs[key]={
+    showDeliveryOnly:Boolean(showDeliveryOnly),
+    filterProjects:[...filterProjects]
+  };
+  uiState.lastChartByUser[currentUserEmail()]=selectedChartId;
+  writeUiState(uiState);
+}
+
+function restoreChartView(){
+  const key=chartUiKey();
+  const projectNames=Object.keys(projects);
+  if(!key){
+    showDeliveryOnly=false;
+    filterProjects=new Set(projectNames);
+    return;
+  }
+  const saved=readUiState().chartPrefs[key];
+  showDeliveryOnly=Boolean(saved?.showDeliveryOnly);
+  const savedProjects=Array.isArray(saved?.filterProjects)?saved.filterProjects.filter(name=>projects[name]):[];
+  filterProjects=new Set(savedProjects.length?savedProjects:projectNames);
+}
+
 function nextImportProjectStyle(index){
   const palette=DEFAULT_PROJECTS[index%DEFAULT_PROJECTS.length]||DEFAULT_PROJECTS[0];
   return{color:palette.color,bg:palette.bg};
+}
+
+function normalizeHexColor(value,fallback='#3b82f6'){
+  const hex=String(value||'').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(hex)?hex:fallback;
+}
+
+function darkenHexColor(hex,amount=0.18){
+  const safe=normalizeHexColor(hex);
+  const clamp=value=>Math.max(0,Math.min(255,Math.round(value)));
+  const r=clamp(parseInt(safe.slice(1,3),16)*(1-amount));
+  const g=clamp(parseInt(safe.slice(3,5),16)*(1-amount));
+  const b=clamp(parseInt(safe.slice(5,7),16)*(1-amount));
+  return `#${[r,g,b].map(value=>value.toString(16).padStart(2,'0')).join('')}`;
+}
+
+function projectControlId(prefix,name){
+  return `${prefix}-${encodeURIComponent(name)}`;
 }
 
 function selectedIsOwner(){
@@ -246,40 +349,53 @@ async function loadCharts(preferCurrent=true){
   const {data,error}=await supabase.from('charts').select('*').order('updated_at',{ascending:false});
   if(error){flashMessage=error.message;chartLoading=false;render();return}
   charts=data||[];
-  if(!preferCurrent||!selectedChartId||!charts.some(chart=>chart.id===selectedChartId))selectedChartId=charts[0]?.id||null;
-  await loadSelectedChart();
+  const requestedChartId=requestedChartIdFromLocation();
+  const savedChartId=readUiState().lastChartByUser?.[currentUserEmail()]||null;
+  const hasCurrent=selectedChartId&&charts.some(chart=>chart.id===selectedChartId);
+  const hasRequested=requestedChartId&&charts.some(chart=>chart.id===requestedChartId);
+  const hasSaved=savedChartId&&charts.some(chart=>chart.id===savedChartId);
+  if(!preferCurrent||!hasCurrent)selectedChartId=hasRequested?requestedChartId:(hasSaved?savedChartId:(charts[0]?.id||null));
+  await loadSelectedChart(selectedChartId);
   chartLoading=false;
   render();
 }
 
-async function loadSelectedChart(){
+async function loadSelectedChart(chartId=selectedChartId){
+  const loadToken=++chartLoadToken;
+  selectedChartId=chartId||null;
   selectedChart=charts.find(chart=>chart.id===selectedChartId)||null;
   if(!selectedChart){
     projects=cloneDefaultProjects();
     tasks=[];
     shareRows=[];
     selectedRole='owner';
+    showDeliveryOnly=false;
     filterProjects=new Set(Object.keys(projects));
     return;
   }
-  const accessPromise=selectedIsOwner()
+  const targetChartId=selectedChart.id;
+  const isOwner=Boolean(selectedChart&&user&&selectedChart.owner_id===user.id);
+  const accessPromise=isOwner
     ? Promise.resolve({data:[{email:currentUserEmail(),role:'owner'}],error:null})
-    : supabase.from('chart_access').select('role').eq('chart_id',selectedChartId).eq('email',currentUserEmail()).maybeSingle();
+    : supabase.from('chart_access').select('role').eq('chart_id',targetChartId).eq('email',currentUserEmail()).maybeSingle();
   const [projectsResult,tasksResult,accessResult,shareResult]=await Promise.all([
-    supabase.from('projects').select('*').eq('chart_id',selectedChartId).order('position'),
-    supabase.from('tasks').select('*').eq('chart_id',selectedChartId).order('start_date').order('end_date').order('task'),
+    supabase.from('projects').select('*').eq('chart_id',targetChartId).order('position'),
+    supabase.from('tasks').select('*').eq('chart_id',targetChartId).order('start_date').order('end_date').order('task'),
     accessPromise,
-    selectedIsOwner()?supabase.from('chart_access').select('*').eq('chart_id',selectedChartId).order('email'):Promise.resolve({data:[],error:null})
+    isOwner?supabase.from('chart_access').select('*').eq('chart_id',targetChartId).order('email'):Promise.resolve({data:[],error:null})
   ]);
+  if(loadToken!==chartLoadToken||targetChartId!==selectedChartId)return;
   if(projectsResult.error||tasksResult.error||accessResult.error||shareResult.error){
     flashMessage=projectsResult.error?.message||tasksResult.error?.message||accessResult.error?.message||shareResult.error?.message||'Could not load chart';
     return;
   }
   projects=normalizeProjects(projectsResult.data);
   tasks=(tasksResult.data||[]).map(normalizeTask);
-  selectedRole=selectedIsOwner()?'owner':(accessResult.data?.role||'viewer');
-  shareRows=selectedIsOwner()?shareResult.data||[]:[];
+  selectedRole=isOwner?'owner':(accessResult.data?.role||'viewer');
+  shareRows=isOwner?shareResult.data||[]:[];
+  restoreChartView();
   syncFilters();
+  rememberSelectedChart();
 }
 
 function dateWindow(){
@@ -328,6 +444,19 @@ function filteredTasks(){
   let filtered=tasks.filter(task=>filterProjects.has(task.project));
   if(showDeliveryOnly)filtered=filtered.filter(task=>task.delivery);
   return filtered;
+}
+
+async function loadPdfTools(){
+  if(!exportPdfPromise){
+    exportPdfPromise=Promise.all([
+      import('https://esm.sh/html2canvas@1.4.1'),
+      import('https://esm.sh/jspdf@2.5.1')
+    ]).then(([canvasModule,pdfModule])=>({
+      html2canvas:canvasModule.default||canvasModule.html2canvas||canvasModule,
+      jsPDF:pdfModule.jsPDF||(pdfModule.default&&pdfModule.default.jsPDF)||pdfModule.default
+    }));
+  }
+  return exportPdfPromise;
 }
 
 function parseCsv(text){
@@ -426,11 +555,11 @@ function render(){
 }
 
 function renderSetup(){
-  app.innerHTML=`<div class="center-wrap"><div class="card"><h1>Cloud <span>Gantt</span></h1><p>This version uses Supabase for login, cloud data, and chart sharing. A default Supabase connection is already embedded here, but you can override it if you ever move to a different project.</p><div class="stack" style="margin-top:18px"><div class="field"><label>Supabase project URL</label><input id="cfg-url" placeholder="https://your-project.supabase.co" value="${esc(supabaseConfig.url||'')}"></div><div class="field"><label>Supabase publishable / anon key</label><textarea id="cfg-key" placeholder="sb_publishable_...">${esc(supabaseConfig.key||'')}</textarea></div><div class="grid-2"><button class="btn btn-primary" onclick="saveSupabaseConfig()">Save connection</button><button class="btn" onclick="clearSupabaseConfig()">Reset to embedded connection</button></div><p class="muted">Run the SQL in <code>gantt_cloud_schema.sql</code> first, then come back here.</p>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}</div></div></div>`;
+  app.innerHTML=`<div class="center-wrap"><div class="card"><h1>Cloud <span>Gantt</span></h1><p>The app is not available right now because it cannot reach the backend configuration.</p>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}<p class="muted" style="margin-top:16px">This screen is only for troubleshooting. Ordinary users should just see the login page when the app is connected normally.</p></div></div>`;
 }
 
 function renderAuth(){
-  app.innerHTML=`<div class="center-wrap"><div class="card"><h1>Cloud <span>Gantt</span></h1><p>Public app, private charts. People only see charts they own or charts shared to their email.</p><div class="stack" style="margin-top:18px"><div class="grid-2"><div class="field"><label>Email</label><input id="auth-email" type="email" placeholder="you@example.com"></div><div class="field"><label>Password</label><input id="auth-password" type="password" placeholder="Password"></div></div><div class="grid-2"><button class="btn btn-primary" onclick="signIn()">Sign in</button><button class="btn btn-accent" onclick="signUp()">Create account</button></div><button class="btn btn-ghost" onclick="sendReset()">Send password reset</button><button class="btn" onclick="editSupabaseConfig()">Change Supabase connection</button>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}<p class="muted">Sharing works by email address. A collaborator signs in with the same email you shared the chart to.</p></div></div></div>`;
+  app.innerHTML=`<div class="center-wrap"><div class="card"><h1>Cloud <span>Gantt</span></h1><p>Public app, private charts. People only see charts they own or charts shared to their email.</p><div class="stack" style="margin-top:18px"><div class="grid-2"><div class="field"><label>Email</label><input id="auth-email" type="email" placeholder="you@example.com"></div><div class="field"><label>Password</label><input id="auth-password" type="password" placeholder="Password"></div></div><div class="grid-2"><button class="btn btn-primary" onclick="signIn()">Sign in</button><button class="btn btn-accent" onclick="signUp()">Create account</button></div><button class="btn btn-ghost" onclick="sendReset()">Send password reset</button>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}<p class="muted">Sharing works by email address. A collaborator signs in with the same email you shared the chart to.</p></div></div></div>`;
 }
 
 function renderWorkspace(){
@@ -442,8 +571,8 @@ function renderWorkspace(){
   const chartWidth=totalDays*DAY_W;
   const today=parseDate(fmtDate(new Date()));
   const todayOff=Math.floor((today-startDate)/DAY_MS);
-  const mainContent=!selectedChart?`<div class="workspace-empty"><div class="empty-box"><h2 style="font-size:22px;letter-spacing:-.03em;margin-bottom:8px">No chart selected yet</h2><p class="muted">Create your first chart on the left. Each chart has its own tasks, projects, exports, and share list.</p></div></div>`:`<div class="toolbar"><h2>${esc(selectedChart.title)}</h2><span class="pill">${selectedIsOwner()?'Owner':selectedRole==='editor'?'Shared editor':'Shared viewer'}</span><span class="toolbar-gap"></span><button class="btn ${showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button>${selectedCanEdit()?'<button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openImportModal()">Import CSV</button>':''}${selectedIsOwner()?'<button class="btn" onclick="openShareModal()">Share</button><button class="btn" onclick="openChartModal()">Chart settings</button>':''}<button class="btn" onclick="exportCsv(false)">Export CSV</button><button class="btn" onclick="exportCsv(true)">Export Done CSV</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">${selectedCanEdit()?'Collaborators with editor access can also change this chart.':'This chart is read-only for your account.'}</div><div class="filters">${Object.entries(projects).map(([name,project])=>`<button class="filter-chip ${filterProjects.has(name)?'on':''}" style="${filterProjects.has(name)?`background:${project.color}33;color:${project.color};border-color:${project.color}55`:''}" onclick='toggleProjectFilter(${jsq(name)})'>${esc(name)}</button>`).join('')}</div><div class="main"><div class="sidebar">${filtered.map(task=>`<div class="sidebar-row ${task.delivery?'delivery':''} ${task.done?'done':''}" onclick="openTaskModal(${jsq(task.id)})"><button class="row-check ${task.done?'done':''}" onclick="toggleDone(event,${jsq(task.id)})" title="${task.done?'Mark as not done':'Mark as done'}">✓</button><div class="dot" style="background:${(projects[task.project]||{}).color||'#666'}"></div><div class="label">${task.delivery?'🚩 ':''}${esc(task.task)}</div><div class="date">${taskRangeLabel(task)}</div></div>`).join('')}${!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${months.map(month=>`<div class="month-col" style="width:${month.days*DAY_W}px">${month.label}</div>`).join('')}</div><div class="chart-body" style="width:${chartWidth}px;height:${Math.max(1,filtered.length)*ROW_H}px">${todayOff>=0&&todayOff<totalDays?`<div class="today-line" style="left:${todayOff*DAY_W}px"></div><div class="today-label" style="left:${todayOff*DAY_W}px">TODAY</div>`:''}${filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return`<div class="chart-row"><div class="bar ${task.delivery?'delivery-bar':''} ${task.done?'done-bar':''}" style="left:${offset*DAY_W}px;width:${width}px;background:linear-gradient(135deg,${project.color},${project.bg})" onmouseenter="showTip(event,${jsq(task.id)})" onmouseleave="hideTip()" onclick="openTaskModal(${jsq(task.id)})"></div></div>`}).join('')}</div></div></div><div class="legend">${Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>`<div class="legend-item"><div class="legend-dot" style="background:${project.color}"></div>${esc(name)}</div>`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div>`;
-  app.innerHTML=`<div class="shell"><aside class="nav"><div class="nav-top"><h1>Cloud <span>Gantt</span></h1><p>Multiple charts, login, and email-based sharing.</p><div class="nav-actions"><button class="btn btn-primary" onclick="openChartCreateModal()">+ New chart</button><button class="btn" onclick="editSupabaseConfig()">Connection</button></div></div><div class="nav-section"><div class="nav-label">My charts</div><div class="chart-list">${owned.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">No owned charts yet.</div>'}</div></div><div class="nav-section"><div class="nav-label">Shared with me</div><div class="chart-list">${shared.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">Nothing shared yet.</div>'}</div></div><div class="nav-bottom"><div class="email">${esc(user.email||'')}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="refreshCharts()">Refresh</button><button class="btn" onclick="signOut()">Sign out</button></div>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}</div></aside><main class="workspace">${chartLoading?'<div class="workspace-empty"><div class="empty-box"><p class="muted">Loading chart…</p></div></div>':mainContent}</main></div>`;
+  const mainContent=!selectedChart?`<div class="workspace-empty"><div class="empty-box"><h2 style="font-size:22px;letter-spacing:-.03em;margin-bottom:8px">No chart selected yet</h2><p class="muted">Create your first chart on the left. Each chart has its own tasks, projects, exports, and share list.</p></div></div>`:`<div id="pdfExportRoot"><div class="toolbar"><h2>${esc(selectedChart.title)}</h2><span class="pill">${selectedIsOwner()?'Owner':selectedRole==='editor'?'Shared editor':'Shared viewer'}</span><span class="toolbar-gap"></span><button class="btn ${showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button>${selectedCanEdit()?'<button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openImportModal()">Import CSV</button>':''}${selectedIsOwner()?'<button class="btn" onclick="openShareModal()">Share</button><button class="btn" onclick="openChartModal()">Chart settings</button>':''}<button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">${selectedCanEdit()?'Collaborators with editor access can also change this chart.':'This chart is read-only for your account.'}</div><div class="filters">${Object.entries(projects).map(([name,project])=>`<button class="filter-chip ${filterProjects.has(name)?'on':''}" style="${filterProjects.has(name)?`background:${project.color}33;color:${project.color};border-color:${project.color}55`:''}" onclick='toggleProjectFilter(${jsq(name)})'>${esc(name)}</button>`).join('')}</div><div class="main"><div class="sidebar">${filtered.map(task=>`<div class="sidebar-row ${task.delivery?'delivery':''} ${task.done?'done':''}" onclick='openTaskModal(${jsq(task.id)})'><button class="row-check ${task.done?'done':''}" onclick='toggleDone(event,${jsq(task.id)})' title="${task.done?'Mark as not done':'Mark as done'}">✓</button><div class="dot" style="background:${(projects[task.project]||{}).color||'#666'}"></div><div class="label">${task.delivery?'🚩 ':''}${esc(task.task)}</div><div class="date">${taskRangeLabel(task)}</div></div>`).join('')}${!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${months.map(month=>`<div class="month-col" style="width:${month.days*DAY_W}px">${month.label}</div>`).join('')}</div><div class="chart-body" style="width:${chartWidth}px;height:${Math.max(1,filtered.length)*ROW_H}px">${todayOff>=0&&todayOff<totalDays?`<div class="today-line" style="left:${todayOff*DAY_W}px"></div><div class="today-label" style="left:${todayOff*DAY_W}px">TODAY</div>`:''}${filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return`<div class="chart-row"><div class="bar ${task.delivery?'delivery-bar':''} ${task.done?'done-bar':''}" style="left:${offset*DAY_W}px;width:${width}px;background:linear-gradient(135deg,${project.color},${project.bg})" onmouseenter='showTip(event,${jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${jsq(task.id)})'></div></div>`}).join('')}</div></div></div><div class="legend">${Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>`<div class="legend-item"><div class="legend-dot" style="background:${project.color}"></div>${esc(name)}</div>`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>`;
+  app.innerHTML=`<div class="shell"><aside class="nav"><div class="nav-top"><h1>Cloud <span>Gantt</span></h1><p>Multiple charts, login, and email-based sharing.</p><div class="nav-actions"><button class="btn btn-primary" onclick="openChartCreateModal()">+ New chart</button></div></div><div class="nav-section"><div class="nav-label">My charts</div><div class="chart-list">${owned.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">No owned charts yet.</div>'}</div></div><div class="nav-section"><div class="nav-label">Shared with me</div><div class="chart-list">${shared.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">Nothing shared yet.</div>'}</div></div><div class="nav-bottom"><div class="email">${esc(user.email||'')}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="refreshCharts()">Refresh</button><button class="btn" onclick="signOut()">Sign out</button></div>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}</div></aside><main class="workspace">${chartLoading?'<div class="workspace-empty"><div class="empty-box"><p class="muted">Loading chart…</p></div></div>':mainContent}</main></div>`;
   const chartArea=document.getElementById('chartArea');
   if(chartArea&&todayOff>0)chartArea.scrollLeft=Math.max(0,todayOff*DAY_W-220);
 }
@@ -451,7 +580,7 @@ function renderWorkspace(){
 function renderChartItem(chart){
   const active=chart.id===selectedChartId;
   const owned=chart.owner_id===user.id;
-  return`<button class="chart-item ${active?'active':''}" onclick="selectChart(${jsq(chart.id)})"><div class="title">${esc(chart.title)}</div><div class="meta"><span>${owned?'Owned':'Shared'}</span><span>${new Date(chart.updated_at||chart.created_at).toLocaleDateString()}</span></div></button>`;
+  return`<button class="chart-item ${active?'active':''}" onclick='selectChart(${jsq(chart.id)})'><div class="title">${esc(chart.title)}</div><div class="meta"><span>${owned?'Owned':'Shared'}</span><span>${new Date(chart.updated_at||chart.created_at).toLocaleDateString()}</span></div></button>`;
 }
 
 async function createChart(){
@@ -487,11 +616,14 @@ async function deleteChart(){
 
 async function addProject(){
   const input=document.getElementById('project-name');
+  const colorInput=document.getElementById('project-color');
   const name=input.value.trim();
   if(!name||projects[name]||!selectedChart||!selectedCanEdit())return;
   const position=Object.keys(projects).length;
   const palette=DEFAULT_PROJECTS[position%DEFAULT_PROJECTS.length];
-  const {error}=await supabase.from('projects').insert({chart_id:selectedChart.id,name,color:palette.color,bg:palette.bg,position});
+  const color=normalizeHexColor(colorInput?.value,palette.color);
+  const bg=darkenHexColor(color);
+  const {error}=await supabase.from('projects').insert({chart_id:selectedChart.id,name,color,bg,position});
   if(error){flashMessage=error.message;render();return}
   await loadSelectedChart();
   renderProjectsModal();
@@ -507,6 +639,53 @@ async function removeProject(name){
   if(tasksResult.error){flashMessage=tasksResult.error.message;render();return}
   const projectResult=await supabase.from('projects').delete().eq('chart_id',selectedChart.id).eq('name',name);
   if(projectResult.error){flashMessage=projectResult.error.message;render();return}
+  await loadSelectedChart();
+  renderProjectsModal();
+  render();
+}
+
+async function renameProject(oldName){
+  if(!selectedChart||!selectedCanEdit()||!projects[oldName])return;
+  const input=document.getElementById(`rename-project-${oldName}`);
+  const newName=input?.value.trim();
+  if(!newName||newName===oldName)return;
+  if(projects[newName]){
+    flashMessage=`A project called "${newName}" already exists.`;
+    renderProjectsModal();
+    render();
+    return;
+  }
+  const linkedTasks=tasks.filter(task=>task.project===oldName);
+  const project=projects[oldName];
+  const insertProjectResult=await supabase.from('projects').insert({
+    chart_id:selectedChart.id,
+    name:newName,
+    color:project.color,
+    bg:project.bg,
+    position:project.position??0
+  });
+  if(insertProjectResult.error){flashMessage=insertProjectResult.error.message;render();return}
+  if(linkedTasks.length){
+    const taskIds=linkedTasks.map(task=>task.id);
+    const updateTasksResult=await supabase.from('tasks').update({project:newName}).in('id',taskIds);
+    if(updateTasksResult.error){flashMessage=updateTasksResult.error.message;render();return}
+  }
+  const deleteProjectResult=await supabase.from('projects').delete().eq('chart_id',selectedChart.id).eq('name',oldName);
+  if(deleteProjectResult.error){flashMessage=deleteProjectResult.error.message;render();return}
+  flashMessage=`Renamed "${oldName}" to "${newName}".`;
+  await loadSelectedChart();
+  renderProjectsModal();
+  render();
+}
+
+async function updateProjectColor(name){
+  if(!selectedChart||!selectedCanEdit()||!projects[name])return;
+  const colorInput=document.getElementById(projectControlId('color-project',name));
+  const color=normalizeHexColor(colorInput?.value,projects[name].color);
+  const bg=darkenHexColor(color);
+  const {error}=await supabase.from('projects').update({color,bg}).eq('chart_id',selectedChart.id).eq('name',name);
+  if(error){flashMessage=error.message;render();return}
+  flashMessage=`Updated color for "${name}".`;
   await loadSelectedChart();
   renderProjectsModal();
   render();
@@ -591,6 +770,79 @@ function exportCsv(doneOnly){
   link.click();
 }
 
+async function exportPdf(){
+  if(!selectedChart)return;
+  const exportRoot=document.getElementById('pdfExportRoot');
+  if(!exportRoot)return;
+  try{
+    flashMessage='Generating PDF…';
+    render();
+    await new Promise(resolve=>setTimeout(resolve,50));
+    const {html2canvas,jsPDF}=await loadPdfTools();
+    const liveRoot=document.getElementById('pdfExportRoot');
+    const canvas=await html2canvas(liveRoot,{
+      backgroundColor:'#e9ecef',
+      scale:2,
+      useCORS:true,
+      scrollX:0,
+      scrollY:0,
+      windowWidth:Math.max(window.innerWidth,liveRoot.scrollWidth+80),
+      windowHeight:Math.max(window.innerHeight,liveRoot.scrollHeight+80),
+      onclone(doc){
+        const cloneRoot=doc.getElementById('pdfExportRoot');
+        const cloneMain=cloneRoot?.querySelector('.main');
+        const cloneSidebar=cloneRoot?.querySelector('.sidebar');
+        const cloneChartArea=doc.getElementById('chartArea');
+        if(cloneRoot){
+          cloneRoot.style.width='max-content';
+          cloneRoot.style.minWidth='1400px';
+        }
+        if(cloneMain)cloneMain.style.overflow='visible';
+        if(cloneSidebar){
+          cloneSidebar.style.overflow='visible';
+          cloneSidebar.style.maxHeight='none';
+          cloneSidebar.style.height='auto';
+        }
+        if(cloneChartArea){
+          cloneChartArea.style.overflow='visible';
+          cloneChartArea.style.maxHeight='none';
+          cloneChartArea.style.height='auto';
+        }
+        doc.body.style.overflow='visible';
+      }
+    });
+    const orientation=canvas.width>canvas.height?'landscape':'portrait';
+    const pdf=new jsPDF({orientation,unit:'pt',format:'a4'});
+    const pageWidth=pdf.internal.pageSize.getWidth();
+    const pageHeight=pdf.internal.pageSize.getHeight();
+    const margin=20;
+    const printableWidth=pageWidth-(margin*2);
+    const printableHeight=pageHeight-(margin*2);
+    const scale=printableWidth/canvas.width;
+    const pageSliceHeight=Math.max(1,Math.floor(printableHeight/scale));
+    let offsetY=0;
+    let pageIndex=0;
+    while(offsetY<canvas.height){
+      const sliceHeight=Math.min(pageSliceHeight,canvas.height-offsetY);
+      const sliceCanvas=document.createElement('canvas');
+      sliceCanvas.width=canvas.width;
+      sliceCanvas.height=sliceHeight;
+      const sliceContext=sliceCanvas.getContext('2d');
+      sliceContext.drawImage(canvas,0,offsetY,canvas.width,sliceHeight,0,0,canvas.width,sliceHeight);
+      if(pageIndex>0)pdf.addPage();
+      pdf.addImage(sliceCanvas.toDataURL('image/png'),'PNG',margin,margin,printableWidth,sliceHeight*scale);
+      offsetY+=sliceHeight;
+      pageIndex+=1;
+    }
+    pdf.save(`${chartTitleForFile()}.pdf`);
+    flashMessage=`Saved ${selectedChart.title} as PDF.`;
+    render();
+  }catch(error){
+    flashMessage=`Could not export PDF. ${error.message||error}`;
+    render();
+  }
+}
+
 function showTip(event,id){
   const task=tasks.find(item=>item.id===id);
   if(!task)return;
@@ -643,7 +895,7 @@ function openProjectsModal(){
 
 function renderProjectsModal(){
   const overlay=modalShell();
-  overlay.innerHTML=`<div class="modal"><h3>Manage projects</h3><p>Projects define the color groups in this chart.</p><div class="project-list">${Object.keys(projects).map(name=>{const count=tasks.filter(task=>task.project===name).length,project=projects[name];return`<div class="project-row"><div class="project-meta"><div class="legend-dot" style="background:${project.color}"></div><div class="project-text"><div class="project-name">${esc(name)}</div><div class="project-count">${count} block${count===1?'':'s'}</div></div></div>${selectedCanEdit()?`<button class="btn btn-danger" onclick='removeProject(${jsq(name)})'>Remove</button>`:''}</div>`}).join('')}</div>${selectedCanEdit()?`<label>New project name</label><input id="project-name" placeholder="e.g. Paper 5"><div class="modal-buttons"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="addProject()">Add project</button></div>`:`<div class="modal-buttons"><button class="btn" onclick="closeModal()">Close</button></div>`}</div>`;
+  overlay.innerHTML=`<div class="modal"><h3>Manage projects</h3><p>Projects define the color groups in this chart.</p><div class="project-list">${Object.keys(projects).map(name=>{const count=tasks.filter(task=>task.project===name).length,project=projects[name],renameId=projectControlId('rename-project',name),colorId=projectControlId('color-project',name);return`<div class="project-row"><div class="project-meta"><div class="legend-dot" style="background:${project.color}"></div><div class="project-text"><div class="project-name">${esc(name)}</div><div class="project-count">${count} block${count===1?'':'s'}</div>${selectedCanEdit()?`<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><input id="${renameId}" value="${esc(name)}" style="min-width:180px"><button class="btn" onclick='renameProject(${jsq(name)})'>Rename</button></div><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><input id="${colorId}" type="color" value="${project.color}" style="width:56px;padding:4px 6px"><button class="btn" onclick='updateProjectColor(${jsq(name)})'>Save color</button></div>`:''}</div></div>${selectedCanEdit()?`<button class="btn btn-danger" onclick='removeProject(${jsq(name)})'>Remove</button>`:''}</div>`}).join('')}</div>${selectedCanEdit()?`<label>New project name</label><input id="project-name" placeholder="e.g. Paper 5"><label>Project color</label><input id="project-color" type="color" value="#3b82f6" style="width:72px;padding:4px 6px"><div class="modal-buttons"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="addProject()">Add project</button></div>`:`<div class="modal-buttons"><button class="btn" onclick="closeModal()">Close</button></div>`}</div>`;
 }
 
 function openShareModal(){
@@ -661,6 +913,128 @@ function openImportModal(){
   importFile=null;
   const overlay=modalShell();
   overlay.innerHTML=`<div class="modal"><h3>Import CSV</h3><p>Export a CSV from your existing planner, then import it here. You can either append the rows or replace the current chart contents.</p><label>CSV file</label><input id="import-file" type="file" accept=".csv,text/csv" onchange="captureImportFile(event)"><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="import-replace"> Replace current blocks and projects in this chart</label><p>If you leave this unticked, the CSV rows will be added on top of the existing chart.</p><div class="modal-buttons"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="runImport()">Import</button></div></div>`;
+}
+
+function openExportModal(){
+  if(!selectedChart)return;
+  const overlay=modalShell();
+  overlay.innerHTML=`<div class="modal"><h3>Export chart</h3><p>Export the current visible chart view as PDF, PNG, CSV, done-only CSV, or standalone HTML.</p><div class="modal-buttons" style="justify-content:flex-start"><button class="btn" onclick="exportPdf()">PDF</button><button class="btn" onclick="exportPng()">PNG</button><button class="btn" onclick="exportCsv(false)">CSV</button><button class="btn" onclick="exportCsv(true)">Done CSV</button><button class="btn" onclick="exportHtmlSnapshot()">HTML</button><button class="btn" onclick="closeModal()">Close</button></div></div>`;
+}
+
+async function exportPng(){
+  if(!selectedChart)return;
+  const exportRoot=document.getElementById('pdfExportRoot');
+  if(!exportRoot)return;
+  try{
+    flashMessage='Generating PNG…';
+    render();
+    await new Promise(resolve=>setTimeout(resolve,50));
+    const {html2canvas}=await loadPdfTools();
+    const liveRoot=document.getElementById('pdfExportRoot');
+    const canvas=await html2canvas(liveRoot,{backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:Math.max(window.innerWidth,liveRoot.scrollWidth+80),windowHeight:Math.max(window.innerHeight,liveRoot.scrollHeight+80)});
+    const link=document.createElement('a');
+    link.href=canvas.toDataURL('image/png');
+    link.download=`${chartTitleForFile()}.png`;
+    link.click();
+    closeModal();
+    flashMessage=`Saved ${selectedChart.title} as PNG.`;
+    render();
+  }catch(error){
+    flashMessage=`Could not export PNG. ${error.message||error}`;
+    render();
+  }
+}
+
+function exportHtmlSnapshot(){
+  if(!selectedChart)return;
+  const styles=Array.from(document.querySelectorAll('style')).map(style=>style.outerHTML).join('\n');
+  const standaloneTitle=selectedChart.title;
+  const standaloneProjects=Object.fromEntries(Object.entries(projects).map(([name,project])=>[name,{name,color:project.color,bg:project.bg,position:project.position??0}]));
+  const standaloneTasks=tasks.map(task=>({
+    id:task.id,
+    task:task.task,
+    description:task.description,
+    outputs:task.outputs,
+    project:task.project,
+    delivery:task.delivery,
+    done:task.done,
+    startDate:getTaskStart(task),
+    endDate:getTaskEnd(task)
+  }));
+  const standalonePayload=JSON.stringify({title:standaloneTitle,projects:standaloneProjects,tasks:standaloneTasks}).replace(/</g,'\\u003c');
+  const dataScript=`<script id="gantt-standalone-data" type="application/json">${standalonePayload}<\/script>`;
+  const appCode = `(()=>{
+const DATA=JSON.parse(document.getElementById('gantt-standalone-data')?.textContent||'{"title":"Gantt Chart","projects":{},"tasks":[]}');
+const DAY_MS=86400000,DAY_W=18,ROW_H=30;
+const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const jsq=v=>JSON.stringify(String(v??''));
+const parseDate=s=>{const [y,m,d]=String(s).split('-').map(Number);return new Date(Date.UTC(y,m-1,d))};
+const fmtDate=d=>\`${'${'}d.getUTCFullYear()}-${'${'}String(d.getUTCMonth()+1).padStart(2,'0')}-${'${'}String(d.getUTCDate()).padStart(2,'0')}\`;
+const escapeCsv=v=>\`"${'${'}String(v??'').replace(/"/g,'""')}"\`;
+const slug=s=>String(s||'gantt_chart').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'gantt_chart';
+const STORAGE_KEY=\`standalone_${'${'}slug(DATA.title)}\`;
+const safeRead=(key,fallback)=>{try{const raw=localStorage.getItem(key);return raw===null?fallback:JSON.parse(raw)}catch{return fallback}};
+const safeWrite=(key,value)=>{try{localStorage.setItem(key,JSON.stringify(value))}catch{}};
+const normalizeHexColor=(value,fallback='#3b82f6')=>/^#[0-9a-fA-F]{6}$/.test(String(value||'').trim())?String(value).trim():fallback;
+const darkenHexColor=(hex,amount=.18)=>{const safe=normalizeHexColor(hex);const clamp=v=>Math.max(0,Math.min(255,Math.round(v)));const r=clamp(parseInt(safe.slice(1,3),16)*(1-amount));const g=clamp(parseInt(safe.slice(3,5),16)*(1-amount));const b=clamp(parseInt(safe.slice(5,7),16)*(1-amount));return \`#${'${'}[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('')}\`};
+const cloneState=value=>JSON.parse(JSON.stringify(value));
+let state=safeRead(STORAGE_KEY,{title:DATA.title,projects:DATA.projects,tasks:DATA.tasks});
+let title=state.title||DATA.title||'Gantt Chart';
+let projects=state.projects&&Object.keys(state.projects).length?state.projects:cloneState(DATA.projects||{});
+let tasks=(Array.isArray(state.tasks)?state.tasks:DATA.tasks||[]).map(normalizeTask);
+let filterProjects=new Set(Object.keys(projects));
+let showDeliveryOnly=false,editTask=null,exportPdfPromise=null;
+const app=document.getElementById('app');
+function normalizeTask(task){const startDate=task.startDate||task.start_date||task.date;const endDate=task.endDate||task.end_date||startDate;const safeEnd=parseDate(endDate)<parseDate(startDate)?startDate:endDate;return{id:task.id||crypto.randomUUID(),task:task.task||'',description:task.description||'',outputs:task.outputs||'',project:task.project||Object.keys(projects)[0]||'Project 1',delivery:Boolean(task.delivery),done:Boolean(task.done),startDate,endDate:safeEnd}};
+function saveState(){safeWrite(STORAGE_KEY,{title,projects,tasks});}
+function sortTasks(){tasks.sort((a,b)=>getTaskStart(a).localeCompare(getTaskStart(b))||getTaskEnd(a).localeCompare(getTaskEnd(b))||a.task.localeCompare(b.task));}
+function syncFilters(){filterProjects=new Set([...filterProjects].filter(name=>projects[name]));if(!filterProjects.size)filterProjects=new Set(Object.keys(projects));}
+function getTaskStart(task){return task.startDate}
+function getTaskEnd(task){return task.endDate}
+function taskDuration(task){return Math.max(1,Math.floor((parseDate(getTaskEnd(task))-parseDate(getTaskStart(task)))/DAY_MS)+1)}
+function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start.slice(5):\`${'${'}start.slice(5)}→${'${'}end.slice(5)}\`}
+function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start:\`${'${'}start} to ${'${'}end}\`}
+function filteredTasks(){let filtered=tasks.filter(task=>filterProjects.has(task.project));if(showDeliveryOnly)filtered=filtered.filter(task=>task.delivery);return filtered}
+function dateWindow(){if(!tasks.length){const year=new Date().getUTCFullYear();const startDate=parseDate(\`${'${'}year}-01-01\`),endDate=parseDate(\`${'${'}year+1}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}const starts=tasks.map(task=>getTaskStart(task)).sort();const ends=tasks.map(task=>getTaskEnd(task)).sort();const startYear=parseDate(starts[0]).getUTCFullYear();const endYear=parseDate(ends[ends.length-1]).getUTCFullYear();const startDate=parseDate(\`${'${'}startYear}-01-01\`),endDate=parseDate(\`${'${'}endYear}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}
+function getMonths(startDate,endDate){const months=[];let year=startDate.getUTCFullYear(),month=startDate.getUTCMonth();while(Date.UTC(year,month,1)<=endDate.getTime()){const monthStart=new Date(Date.UTC(year,month,1)),nextStart=new Date(Date.UTC(year,month+1,1)),visibleStart=monthStart.getTime()<startDate.getTime()?startDate:monthStart,visibleEnd=nextStart.getTime()>endDate.getTime()?new Date(endDate.getTime()+DAY_MS):nextStart;months.push({label:monthStart.toLocaleDateString('en-US',{month:'short',year:'2-digit',timeZone:'UTC'}),days:Math.ceil((visibleEnd-visibleStart)/DAY_MS)});month+=1;if(month===12){month=0;year+=1}}return months}
+function dayOffset(ds,startDate){return Math.floor((parseDate(ds)-startDate)/DAY_MS)}
+async function loadPdfTools(){if(!exportPdfPromise){exportPdfPromise=Promise.all([import('https://esm.sh/html2canvas@1.4.1'),import('https://esm.sh/jspdf@2.5.1')]).then(([canvasModule,pdfModule])=>({html2canvas:canvasModule.default||canvasModule.html2canvas||canvasModule,jsPDF:pdfModule.jsPDF||(pdfModule.default&&pdfModule.default.jsPDF)||pdfModule.default}))}return exportPdfPromise}
+function render(){sortTasks();saveState();syncFilters();const filtered=filteredTasks();const {startDate,endDate,totalDays}=dateWindow();const months=getMonths(startDate,endDate);const chartWidth=totalDays*DAY_W;const today=parseDate(fmtDate(new Date()));const todayOff=Math.floor((today-startDate)/DAY_MS);app.innerHTML=\`<div id="pdfExportRoot"><div class="toolbar"><h2>${'${'}esc(title)}</h2><span class="toolbar-gap"></span><button class="btn ${'${'}showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button><button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">Standalone local editor. Changes save in this browser only.</div><div class="filters">${'${'}Object.entries(projects).map(([name,project])=>\`<button class="filter-chip ${'${'}filterProjects.has(name)?'on':''}" style="${'${'}filterProjects.has(name)?\`background:${'${'}project.color}33;color:${'${'}project.color};border-color:${'${'}project.color}55\`:''}" onclick='toggleProjectFilter(${ '${'}jsq(name)})'>${'${'}esc(name)}</button>\`).join('')}</div><div class="main"><div class="sidebar">${'${'}filtered.map(task=>\`<div class="sidebar-row ${'${'}task.delivery?'delivery':''} ${'${'}task.done?'done':''}" onclick='openTaskModal(${ '${'}jsq(task.id)})'><button class="row-check ${'${'}task.done?'done':''}" onclick='toggleDone(event,${ '${'}jsq(task.id)})'>✓</button><div class="dot" style="background:${'${'}(projects[task.project]||{}).color||'#666'}"></div><div class="label">${'${'}task.delivery?'🚩 ':''}${'${'}esc(task.task)}</div><div class="date">${'${'}taskRangeLabel(task)}</div></div>\`).join('')}${'${'}!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${'${'}months.map(month=>\`<div class="month-col" style="width:${'${'}month.days*DAY_W}px">${'${'}month.label}</div>\`).join('')}</div><div class="chart-body" style="width:${'${'}chartWidth}px;height:${'${'}Math.max(1,filtered.length)*ROW_H}px">${'${'}todayOff>=0&&todayOff<totalDays?\`<div class="today-line" style="left:${'${'}todayOff*DAY_W}px"></div><div class="today-label" style="left:${'${'}todayOff*DAY_W}px">TODAY</div>\`:''}${'${'}filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return\`<div class="chart-row"><div class="bar ${'${'}task.delivery?'delivery-bar':''} ${'${'}task.done?'done-bar':''}" style="left:${'${'}offset*DAY_W}px;width:${'${'}width}px;background:linear-gradient(135deg,${'${'}project.color},${'${'}project.bg})" onmouseenter='showTip(event,${ '${'}jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${ '${'}jsq(task.id)})'></div></div>\`}).join('')}</div></div></div><div class="legend">${'${'}Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>\`<div class="legend-item"><div class="legend-dot" style="background:${'${'}project.color}"></div>${'${'}esc(name)}</div>\`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>\`;const chartArea=document.getElementById('chartArea');if(chartArea&&todayOff>0)chartArea.scrollLeft=Math.max(0,todayOff*DAY_W-220)}
+function modalShell(){let overlay=document.getElementById('modal-overlay');if(!overlay){overlay=document.createElement('div');overlay.id='modal-overlay';document.body.appendChild(overlay)}overlay.className='modal-overlay';overlay.onclick=e=>{if(e.target===overlay)closeModal()};return overlay}
+function closeModal(){const overlay=document.getElementById('modal-overlay');if(overlay)overlay.remove();editTask=null}
+function openTaskModal(id){if(id===-1){const todayValue=fmtDate(parseDate(fmtDate(new Date())));editTask={id:crypto.randomUUID(),task:'',description:'',outputs:'',project:Object.keys(projects)[0]||'Project 1',startDate:todayValue,endDate:todayValue,delivery:false,done:false}}else{editTask=tasks.find(task=>task.id===id)}if(!editTask)return;const overlay=modalShell();overlay.innerHTML=\`<div class="modal"><h3>${'${'}tasks.some(task=>task.id===editTask.id)?'Edit block':'Add block'}</h3><label>Task</label><input id="m-task" value="${'${'}esc(editTask.task)}"><label>Description / details</label><textarea id="m-desc">${'${'}esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out">${'${'}esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${'${'}getTaskStart(editTask)}"><label>End date</label><input id="m-end" type="date" value="${'${'}getTaskEnd(editTask)}"><label>Project</label><select id="m-proj">${'${'}Object.keys(projects).map(name=>\`<option value="${'${'}esc(name)}" ${'${'}name===editTask.project?'selected':''}>${'${'}esc(name)}</option>\`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${'${'}editTask.delivery?'checked':''}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${'${'}editTask.done?'checked':''}> ✓ Mark as done</label><div class="modal-buttons">${'${'}tasks.some(task=>task.id===editTask.id)?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button>':''}<button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="saveTask()">Save</button></div></div>\`}
+function saveTask(){const taskValue=document.getElementById('m-task').value.trim(),description=document.getElementById('m-desc').value.trim(),outputs=document.getElementById('m-out').value.trim(),startDate=document.getElementById('m-start').value,endDateInput=document.getElementById('m-end').value,project=document.getElementById('m-proj').value,delivery=document.getElementById('m-deliver').checked,done=document.getElementById('m-done').checked;if(!taskValue||!startDate||!endDateInput||!project)return;const safeEnd=parseDate(endDateInput)<parseDate(startDate)?startDate:endDateInput;const existingIndex=tasks.findIndex(task=>task.id===editTask.id);const nextTask=normalizeTask({...editTask,task:taskValue,description,outputs,project,delivery,done,startDate,endDate:safeEnd});if(existingIndex===-1)tasks.push(nextTask);else tasks.splice(existingIndex,1,nextTask);closeModal();render()}
+function deleteTask(){tasks=tasks.filter(task=>task.id!==editTask.id);closeModal();render()}
+function toggleDone(event,id){event.stopPropagation();const task=tasks.find(item=>item.id===id);if(!task)return;task.done=!task.done;render()}
+function openProjectsModal(){const overlay=modalShell();overlay.innerHTML=\`<div class="modal"><h3>Manage projects</h3><p>Projects define the color groups in this chart.</p><div class="project-list">${'${'}Object.keys(projects).map(name=>{const count=tasks.filter(task=>task.project===name).length,project=projects[name],renameId=\`rename-${'${'}encodeURIComponent(name)}\`,colorId=\`color-${'${'}encodeURIComponent(name)}\`;return\`<div class="project-row"><div class="project-meta"><div class="legend-dot" style="background:${'${'}project.color}"></div><div class="project-text"><div class="project-name">${'${'}esc(name)}</div><div class="project-count">${'${'}count} block${'${'}count===1?'':'s'}</div><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><input id="${'${'}renameId}" value="${'${'}esc(name)}" style="min-width:180px"><button class="btn" onclick='renameProject(${ '${'}jsq(name)})'>Rename</button></div><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><input id="${'${'}colorId}" type="color" value="${'${'}project.color}" style="width:56px;padding:4px 6px"><button class="btn" onclick='updateProjectColor(${ '${'}jsq(name)})'>Save color</button></div></div></div><button class="btn btn-danger" onclick='removeProject(${ '${'}jsq(name)})'>Remove</button></div>\`}).join('')}</div><label>New project name</label><input id="project-name" placeholder="e.g. Paper 5"><label>Project color</label><input id="project-color" type="color" value="#3b82f6" style="width:72px;padding:4px 6px"><div class="modal-buttons"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="addProject()">Add project</button></div></div>\`}
+function addProject(){const input=document.getElementById('project-name'),colorInput=document.getElementById('project-color');const name=input.value.trim();if(!name||projects[name])return;const color=normalizeHexColor(colorInput?.value,'#3b82f6');projects[name]={name,color,bg:darkenHexColor(color),position:Object.keys(projects).length};filterProjects.add(name);openProjectsModal();render()}
+function renameProject(oldName){const input=document.getElementById(\`rename-${'${'}encodeURIComponent(oldName)}\`);const newName=input?.value.trim();if(!newName||newName===oldName||projects[newName])return;const project={...projects[oldName],name:newName};delete projects[oldName];projects[newName]=project;tasks.forEach(task=>{if(task.project===oldName)task.project=newName});syncFilters();openProjectsModal();render()}
+function updateProjectColor(name){const input=document.getElementById(\`color-${'${'}encodeURIComponent(name)}\`);const color=normalizeHexColor(input?.value,projects[name].color);projects[name].color=color;projects[name].bg=darkenHexColor(color);openProjectsModal();render()}
+function removeProject(name){if(Object.keys(projects).length===1)return;tasks=tasks.filter(task=>task.project!==name);delete projects[name];syncFilters();openProjectsModal();render()}
+function toggleDeliveryOnly(){showDeliveryOnly=!showDeliveryOnly;render()}
+function toggleProjectFilter(name){const allNames=Object.keys(projects);const isVisible=filterProjects.has(name);if(filterProjects.size===allNames.length){filterProjects=new Set([name])}else if(filterProjects.size===1&&isVisible){filterProjects=new Set(allNames)}else if(isVisible){filterProjects.delete(name);if(!filterProjects.size)filterProjects=new Set(allNames)}else{filterProjects.add(name)}render()}
+function showTip(event,id){const task=tasks.find(item=>item.id===id);if(!task)return;let tip=document.getElementById('tooltip');if(!tip){tip=document.createElement('div');tip.id='tooltip';tip.className='tooltip';document.body.appendChild(tip)}const project=projects[task.project]||{};tip.innerHTML=\`<div class="tt-title">${'${'}task.delivery?'🚩 ':''}${'${'}esc(task.task)}</div><div class="tt-date">${'${'}taskFullRange(task)}${'${'}taskDuration(task)>1?\` (${'${'}taskDuration(task)} days)\`:''}</div><div class="tt-proj" style="color:${'${'}project.color||'#999'}">${'${'}esc(task.project)}</div><div class="tt-proj">${'${'}task.done?'Done':'To do'}</div>${'${'}task.description?\`<div class="tt-block">${'${'}esc(task.description)}</div>\`:''}${'${'}task.outputs?\`<div class="tt-block"><strong>Outputs / paths</strong>\n${'${'}esc(task.outputs)}</div>\`:''}\`;tip.style.display='block';tip.style.left=Math.min(event.clientX+12,window.innerWidth-330)+'px';tip.style.top=Math.max(16,event.clientY-60)+'px'}
+function hideTip(){const tip=document.getElementById('tooltip');if(tip)tip.style.display='none'}
+function openExportModal(){const overlay=modalShell();overlay.innerHTML='<div class="modal"><h3>Export chart</h3><p>Export the current visible chart view as PDF, PNG, CSV, or done-only CSV.</p><div class="modal-buttons" style="justify-content:flex-start"><button class="btn" onclick="exportPdf()">PDF</button><button class="btn" onclick="exportPng()">PNG</button><button class="btn" onclick="exportCsv(false)">CSV</button><button class="btn" onclick="exportCsv(true)">Done CSV</button><button class="btn" onclick="closeModal()">Close</button></div></div>'}
+function exportCsv(doneOnly){const rows=(doneOnly?tasks.filter(task=>task.done):tasks).slice().sort((a,b)=>getTaskStart(a).localeCompare(getTaskStart(b))||getTaskEnd(a).localeCompare(getTaskEnd(b))||a.task.localeCompare(b.task));let csv='Start Date,End Date,Task,Description,Outputs,Project,Delivery,Status\\n';rows.forEach(task=>{csv+=\`${'${'}escapeCsv(getTaskStart(task))},${'${'}escapeCsv(getTaskEnd(task))},${'${'}escapeCsv(task.task)},${'${'}escapeCsv(task.description)},${'${'}escapeCsv(task.outputs)},${'${'}escapeCsv(task.project)},${'${'}escapeCsv(task.delivery?'DELIVER':'')},${'${'}escapeCsv(task.done?'Done':'To do')}\\n\`});const blob=new Blob([csv],{type:'text/csv'}),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=\`${'${'}slug(title)}${'${'}doneOnly?'_done':''}.csv\`;link.click()}
+async function exportPng(){const root=document.getElementById('pdfExportRoot');const {html2canvas}=await loadPdfTools();const canvas=await html2canvas(root,{backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:Math.max(window.innerWidth,root.scrollWidth+80),windowHeight:Math.max(window.innerHeight,root.scrollHeight+80)});const link=document.createElement('a');link.href=canvas.toDataURL('image/png');link.download=\`${'${'}slug(title)}.png\`;link.click();closeModal()}
+async function exportPdf(){const root=document.getElementById('pdfExportRoot');const {html2canvas,jsPDF}=await loadPdfTools();const canvas=await html2canvas(root,{backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:Math.max(window.innerWidth,root.scrollWidth+80),windowHeight:Math.max(window.innerHeight,root.scrollHeight+80)});const orientation=canvas.width>canvas.height?'landscape':'portrait';const pdf=new jsPDF({orientation,unit:'pt',format:'a4'});const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=20,printableWidth=pageWidth-(margin*2),printableHeight=pageHeight-(margin*2),scale=printableWidth/canvas.width,pageSliceHeight=Math.max(1,Math.floor(printableHeight/scale));let offsetY=0,pageIndex=0;while(offsetY<canvas.height){const sliceHeight=Math.min(pageSliceHeight,canvas.height-offsetY),sliceCanvas=document.createElement('canvas');sliceCanvas.width=canvas.width;sliceCanvas.height=sliceHeight;const sliceContext=sliceCanvas.getContext('2d');sliceContext.drawImage(canvas,0,offsetY,canvas.width,sliceHeight,0,0,canvas.width,sliceHeight);if(pageIndex>0)pdf.addPage();pdf.addImage(sliceCanvas.toDataURL('image/png'),'PNG',margin,margin,printableWidth,sliceHeight*scale);offsetY+=sliceHeight;pageIndex+=1}pdf.save(\`${'${'}slug(title)}.pdf\`);closeModal()}
+window.openTaskModal=openTaskModal;window.saveTask=saveTask;window.deleteTask=deleteTask;window.toggleDone=toggleDone;window.openProjectsModal=openProjectsModal;window.addProject=addProject;window.renameProject=renameProject;window.updateProjectColor=updateProjectColor;window.removeProject=removeProject;window.toggleDeliveryOnly=toggleDeliveryOnly;window.toggleProjectFilter=toggleProjectFilter;window.showTip=showTip;window.hideTip=hideTip;window.openExportModal=openExportModal;window.exportCsv=exportCsv;window.exportPng=exportPng;window.exportPdf=exportPdf;window.closeModal=closeModal;render();})();`;
+  const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${esc(selectedChart.title)}</title>${styles}</head><body><div id="app"></div>${dataScript}<script>${appCode.replace(/<\/script>/g,'<\\/script>')}<\/script></body></html>`;
+  const filename=`${chartTitleForFile()}.html`;
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=url;
+  link.download=filename;
+  link.rel='noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  closeModal();
+  flashMessage=`Saved ${selectedChart.title} as standalone HTML.`;
+  render();
 }
 
 function openTaskModal(id){
@@ -801,20 +1175,40 @@ function editSupabaseConfig(){
 
 function toggleDeliveryOnly(){
   showDeliveryOnly=!showDeliveryOnly;
+  rememberChartView();
   render();
 }
 
 function toggleProjectFilter(name){
-  if(filterProjects.has(name))filterProjects.delete(name);else filterProjects.add(name);
+  const allNames=Object.keys(projects);
+  const isVisible=filterProjects.has(name);
+  const showingAll=filterProjects.size===allNames.length;
+  if(showingAll){
+    filterProjects=new Set([name]);
+  }else if(filterProjects.size===1){
+    filterProjects=isVisible?new Set(allNames):new Set([name]);
+  }else if(isVisible){
+    filterProjects=new Set([name]);
+  }else{
+    filterProjects.add(name);
+  }
+  rememberChartView();
   render();
 }
 
 async function selectChart(id){
-  if(selectedChartId===id)return;
+  if(selectedChartId===id&&!chartLoading)return;
   selectedChartId=id;
+  rememberSelectedChart(id);
+  selectedChart=charts.find(chart=>chart.id===id)||null;
+  projects={};
+  tasks=[];
+  shareRows=[];
+  showDeliveryOnly=false;
+  filterProjects=new Set();
   chartLoading=true;
   render();
-  await loadSelectedChart();
+  await loadSelectedChart(id);
   chartLoading=false;
   render();
 }
@@ -842,11 +1236,14 @@ window.saveChartSettings=saveChartSettings;
 window.deleteChart=deleteChart;
 window.openProjectsModal=openProjectsModal;
 window.addProject=addProject;
+window.updateProjectColor=updateProjectColor;
+window.renameProject=renameProject;
 window.removeProject=removeProject;
 window.openShareModal=openShareModal;
 window.saveShare=saveShare;
 window.removeShare=removeShare;
 window.openImportModal=openImportModal;
+window.openExportModal=openExportModal;
 window.captureImportFile=captureImportFile;
 window.runImport=runImport;
 window.openTaskModal=openTaskModal;
@@ -855,8 +1252,14 @@ window.deleteTask=deleteTask;
 window.toggleDone=toggleDone;
 window.closeModal=closeModal;
 window.exportCsv=exportCsv;
+window.exportPdf=exportPdf;
+window.exportPng=exportPng;
+window.exportHtmlSnapshot=exportHtmlSnapshot;
 window.showTip=showTip;
 window.hideTip=hideTip;
+
+window.addEventListener('pageshow',()=>{if(user)resumePlannerView()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&user)resumePlannerView()});
 
 init();
 </script>
