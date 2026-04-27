@@ -47,7 +47,8 @@ button,input,select,textarea{font:inherit}
 .chart-item .meta{font-size:11px;color:var(--text2);margin-top:6px;display:flex;gap:8px;flex-wrap:wrap}
 .nav-bottom{margin-top:auto;padding:14px 18px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
 .nav-bottom .email{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis}
-.workspace{display:flex;flex-direction:column;overflow:hidden}
+.workspace{display:flex;flex-direction:column;overflow:hidden;height:100vh}
+#pdfExportRoot{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
 .workspace-empty{display:flex;align-items:center;justify-content:center;flex:1;padding:28px}
 .empty-box{max-width:540px;padding:28px;border-radius:18px;border:1px dashed var(--border);background:rgba(255,255,255,.35)}
 .toolbar{display:flex;align-items:center;gap:10px;padding:14px 18px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap}
@@ -57,8 +58,8 @@ button,input,select,textarea{font:inherit}
 .filters{display:flex;gap:6px;flex-wrap:wrap;padding:8px 18px;background:var(--surface);border-bottom:1px solid var(--border)}
 .filter-chip{padding:4px 10px;border-radius:999px;font-size:11px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text2);transition:all .15s}
 .filter-chip.on{color:#fff;border-color:transparent}
-.main{display:flex;flex:1;overflow:hidden}
-.sidebar{width:360px;min-width:360px;overflow-y:auto;border-right:1px solid var(--border);background:var(--surface)}
+.main{display:flex;flex:1;overflow:hidden;min-height:0}
+.sidebar{width:360px;min-width:360px;overflow-y:auto;border-right:1px solid var(--border);background:var(--surface);min-height:0}
 .sidebar-row{display:flex;align-items:center;padding:0 12px;height:30px;border-bottom:1px solid var(--border);font-size:11px;cursor:pointer;transition:background .1s;gap:6px}
 .sidebar-row:hover{background:var(--surface2)}
 .sidebar-row .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
@@ -71,7 +72,7 @@ button,input,select,textarea{font:inherit}
 .row-check{width:16px;height:16px;border-radius:999px;border:1px solid var(--border);background:transparent;color:transparent;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all .15s}
 .row-check:hover{background:#dfe4ea}
 .row-check.done{background:var(--accent);border-color:var(--accent);color:#102018}
-.chart-area{flex:1;overflow:auto;position:relative;background:linear-gradient(180deg,rgba(255,255,255,.2),transparent)}
+.chart-area{flex:1;overflow:auto;position:relative;background:linear-gradient(180deg,rgba(255,255,255,.2),transparent);min-height:0}
 .chart-header{position:sticky;top:0;z-index:10;display:flex;background:var(--surface);border-bottom:1px solid var(--border)}
 .month-col{text-align:center;font-size:10px;font-weight:600;color:var(--text2);padding:6px 0;border-right:1px solid var(--border);flex-shrink:0}
 .chart-body{position:relative}
@@ -115,10 +116,40 @@ button,input,select,textarea{font:inherit}
   .main{flex-direction:column}
   .sidebar{width:100%;min-width:0;max-height:38vh;border-right:none;border-bottom:1px solid var(--border)}
 }
+#mascot{position:fixed;bottom:18px;right:22px;z-index:9999;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;user-select:none}
+#mascot-bubble{background:#fff;border:1.5px solid var(--border);border-radius:14px 14px 4px 14px;padding:8px 13px;font-size:12px;color:var(--text);max-width:180px;line-height:1.4;box-shadow:0 4px 16px rgba(0,0,0,.1);opacity:0;transform:translateY(4px) scale(.95);transition:opacity .25s,transform .25s;pointer-events:none}
+#mascot-bubble.show{opacity:1;transform:translateY(0) scale(1)}
+#mascot-face{width:54px;height:54px;filter:drop-shadow(0 3px 8px rgba(0,0,0,.18));transition:transform .15s}
+#mascot:hover #mascot-face{transform:scale(1.1) rotate(-5deg)}
+@keyframes mascot-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+#mascot-face{animation:mascot-bounce 3s ease-in-out infinite}
+#mascot:hover #mascot-face{animation:none}
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="mascot" onclick="mascotSpeak()" title="Click me!">
+  <div id="mascot-bubble"></div>
+  <svg id="mascot-face" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="11" cy="11" r="11" fill="#1a1a1a"/>
+    <circle cx="49" cy="11" r="11" fill="#1a1a1a"/>
+    <circle cx="11" cy="11" r="6" fill="#333"/>
+    <circle cx="49" cy="11" r="6" fill="#333"/>
+    <circle cx="30" cy="32" r="25" fill="#fff" stroke="#e0e0e0" stroke-width="1"/>
+    <ellipse cx="20" cy="29" rx="9" ry="8" fill="#1a1a1a" transform="rotate(-8 20 29)"/>
+    <ellipse cx="40" cy="29" rx="9" ry="8" fill="#1a1a1a" transform="rotate(8 40 29)"/>
+    <circle cx="20" cy="30" r="4.5" fill="#fff"/>
+    <circle cx="40" cy="30" r="4.5" fill="#fff"/>
+    <circle cx="21" cy="30" r="2.5" fill="#111"/>
+    <circle cx="41" cy="30" r="2.5" fill="#111"/>
+    <circle cx="22" cy="28.5" r="1" fill="#fff"/>
+    <circle cx="42" cy="28.5" r="1" fill="#fff"/>
+    <ellipse cx="30" cy="38" rx="4" ry="3" fill="#444"/>
+    <path d="M26 41 Q30 46 34 41" fill="none" stroke="#444" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="14" cy="41" r="6" fill="#ffb3c6" opacity="0.45"/>
+    <circle cx="46" cy="41" r="6" fill="#ffb3c6" opacity="0.45"/>
+  </svg>
+</div>
 <script type="module">
 const STORAGE_KEYS={supabaseConfig:'cloudGanttSupabaseConfig',uiState:'cloudGanttUiState'};
 const EMBEDDED_SUPABASE_CONFIG={
@@ -163,7 +194,7 @@ async function resumePlannerView(){
     const requestedChartId=requestedChartIdFromLocation();
     const savedChartId=readUiState().lastChartByUser?.[currentUserEmail()]||null;
     selectedChartId=requestedChartId||savedChartId||selectedChartId;
-    await loadCharts(true);
+    await loadCharts(true,charts.length>0);
   }finally{
     resumeLoadPending=false;
   }
@@ -180,7 +211,7 @@ async function init(){
     supabase.auth.onAuthStateChange(async(_event,nextSession)=>{
       session=nextSession;
       user=nextSession?.user||null;
-      if(user)await loadCharts();
+      if(user)await loadCharts(true,charts.length>0);
       else resetChartState();
       render();
     });
@@ -342,10 +373,9 @@ function syncFilters(){
   if(!filterProjects.size)filterProjects=new Set(Object.keys(projects));
 }
 
-async function loadCharts(preferCurrent=true){
+async function loadCharts(preferCurrent=true,silent=false){
   if(!supabase||!user)return;
-  chartLoading=true;
-  render();
+  if(!silent){chartLoading=true;render();}
   const {data,error}=await supabase.from('charts').select('*').order('updated_at',{ascending:false});
   if(error){flashMessage=error.message;chartLoading=false;render();return}
   charts=data||[];
@@ -571,7 +601,7 @@ function renderWorkspace(){
   const chartWidth=totalDays*DAY_W;
   const today=parseDate(fmtDate(new Date()));
   const todayOff=Math.floor((today-startDate)/DAY_MS);
-  const mainContent=!selectedChart?`<div class="workspace-empty"><div class="empty-box"><h2 style="font-size:22px;letter-spacing:-.03em;margin-bottom:8px">No chart selected yet</h2><p class="muted">Create your first chart on the left. Each chart has its own tasks, projects, exports, and share list.</p></div></div>`:`<div id="pdfExportRoot"><div class="toolbar"><h2>${esc(selectedChart.title)}</h2><span class="pill">${selectedIsOwner()?'Owner':selectedRole==='editor'?'Shared editor':'Shared viewer'}</span><span class="toolbar-gap"></span><button class="btn ${showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button>${selectedCanEdit()?'<button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openImportModal()">Import CSV</button>':''}${selectedIsOwner()?'<button class="btn" onclick="openShareModal()">Share</button><button class="btn" onclick="openChartModal()">Chart settings</button>':''}<button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">${selectedCanEdit()?'Collaborators with editor access can also change this chart.':'This chart is read-only for your account.'}</div><div class="filters">${Object.entries(projects).map(([name,project])=>`<button class="filter-chip ${filterProjects.has(name)?'on':''}" style="${filterProjects.has(name)?`background:${project.color}33;color:${project.color};border-color:${project.color}55`:''}" onclick='toggleProjectFilter(${jsq(name)})'>${esc(name)}</button>`).join('')}</div><div class="main"><div class="sidebar">${filtered.map(task=>`<div class="sidebar-row ${task.delivery?'delivery':''} ${task.done?'done':''}" onclick='openTaskModal(${jsq(task.id)})'><button class="row-check ${task.done?'done':''}" onclick='toggleDone(event,${jsq(task.id)})' title="${task.done?'Mark as not done':'Mark as done'}">✓</button><div class="dot" style="background:${(projects[task.project]||{}).color||'#666'}"></div><div class="label">${task.delivery?'🚩 ':''}${esc(task.task)}</div><div class="date">${taskRangeLabel(task)}</div></div>`).join('')}${!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${months.map(month=>`<div class="month-col" style="width:${month.days*DAY_W}px">${month.label}</div>`).join('')}</div><div class="chart-body" style="width:${chartWidth}px;height:${Math.max(1,filtered.length)*ROW_H}px">${todayOff>=0&&todayOff<totalDays?`<div class="today-line" style="left:${todayOff*DAY_W}px"></div><div class="today-label" style="left:${todayOff*DAY_W}px">TODAY</div>`:''}${filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return`<div class="chart-row"><div class="bar ${task.delivery?'delivery-bar':''} ${task.done?'done-bar':''}" style="left:${offset*DAY_W}px;width:${width}px;background:linear-gradient(135deg,${project.color},${project.bg})" onmouseenter='showTip(event,${jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${jsq(task.id)})'></div></div>`}).join('')}</div></div></div><div class="legend">${Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>`<div class="legend-item"><div class="legend-dot" style="background:${project.color}"></div>${esc(name)}</div>`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>`;
+  const mainContent=!selectedChart?`<div class="workspace-empty"><div class="empty-box"><h2 style="font-size:22px;letter-spacing:-.03em;margin-bottom:8px">No chart selected yet</h2><p class="muted">Create your first chart on the left. Each chart has its own tasks, projects, exports, and share list.</p></div></div>`:`<div id="pdfExportRoot"><div class="toolbar"><h2>${esc(selectedChart.title)}</h2><span class="pill">${selectedIsOwner()?'Owner':selectedRole==='editor'?'Shared editor':'Shared viewer'}</span><span class="toolbar-gap"></span><button class="btn ${showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button>${selectedCanEdit()?'<button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openImportModal()">Import CSV</button>':''}${selectedIsOwner()?'<button class="btn" onclick="openShareModal()">Share</button><button class="btn" onclick="openChartModal()">Chart settings</button>':''}<button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">${selectedCanEdit()?'Collaborators with editor access can also change this chart.':'This chart is read-only for your account.'}</div><div class="filters"><button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;border-radius:999px" onclick="toggleSelectAllProjects()">${filterProjects.size===Object.keys(projects).length?'Deselect all':'Select all'}</button>${Object.entries(projects).map(([name,project])=>`<button class="filter-chip ${filterProjects.has(name)?'on':''}" style="${filterProjects.has(name)?`background:${project.color}33;color:${project.color};border-color:${project.color}55`:''}" onclick='toggleProjectFilter(${jsq(name)})'>${esc(name)}</button>`).join('')}</div><div class="main"><div class="sidebar">${filtered.map(task=>`<div class="sidebar-row ${task.delivery?'delivery':''} ${task.done?'done':''}" onclick='openTaskModal(${jsq(task.id)})'><button class="row-check ${task.done?'done':''}" onclick='toggleDone(event,${jsq(task.id)})' title="${task.done?'Mark as not done':'Mark as done'}">✓</button><div class="dot" style="background:${(projects[task.project]||{}).color||'#666'}"></div><div class="label">${task.delivery?'🚩 ':''}${esc(task.task)}</div><div class="date">${taskRangeLabel(task)}</div></div>`).join('')}${!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${months.map(month=>`<div class="month-col" style="width:${month.days*DAY_W}px">${month.label}</div>`).join('')}</div><div class="chart-body" style="width:${chartWidth}px;height:${Math.max(1,filtered.length)*ROW_H}px">${todayOff>=0&&todayOff<totalDays?`<div class="today-line" style="left:${todayOff*DAY_W}px"></div><div class="today-label" style="left:${todayOff*DAY_W}px">TODAY</div>`:''}${filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return`<div class="chart-row"><div class="bar ${task.delivery?'delivery-bar':''} ${task.done?'done-bar':''}" style="left:${offset*DAY_W}px;width:${width}px;background:linear-gradient(135deg,${project.color},${project.bg})" onmouseenter='showTip(event,${jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${jsq(task.id)})'></div></div>`}).join('')}</div></div></div><div class="legend">${Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>`<div class="legend-item"><div class="legend-dot" style="background:${project.color}"></div>${esc(name)}</div>`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>`;
   app.innerHTML=`<div class="shell"><aside class="nav"><div class="nav-top"><h1>Cloud <span>Gantt</span></h1><p>Multiple charts, login, and email-based sharing.</p><div class="nav-actions"><button class="btn btn-primary" onclick="openChartCreateModal()">+ New chart</button></div></div><div class="nav-section"><div class="nav-label">My charts</div><div class="chart-list">${owned.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">No owned charts yet.</div>'}</div></div><div class="nav-section"><div class="nav-label">Shared with me</div><div class="chart-list">${shared.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">Nothing shared yet.</div>'}</div></div><div class="nav-bottom"><div class="email">${esc(user.email||'')}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="refreshCharts()">Refresh</button><button class="btn" onclick="signOut()">Sign out</button></div>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}</div></aside><main class="workspace">${chartLoading?'<div class="workspace-empty"><div class="empty-box"><p class="muted">Loading chart…</p></div></div>':mainContent}</main></div>`;
   const chartArea=document.getElementById('chartArea');
   if(chartArea&&todayOff>0)chartArea.scrollLeft=Math.max(0,todayOff*DAY_W-220);
@@ -646,7 +676,7 @@ async function removeProject(name){
 
 async function renameProject(oldName){
   if(!selectedChart||!selectedCanEdit()||!projects[oldName])return;
-  const input=document.getElementById(`rename-project-${oldName}`);
+  const input=document.getElementById(projectControlId('rename-project',oldName));
   const newName=input?.value.trim();
   if(!newName||newName===oldName)return;
   if(projects[newName]){
@@ -770,77 +800,77 @@ function exportCsv(doneOnly){
   link.click();
 }
 
+async function captureFullChart(){
+  const {html2canvas}=await loadPdfTools();
+  const root=document.getElementById('pdfExportRoot');
+  if(!root)throw new Error('Chart root not found');
+  const app=document.getElementById('app');
+  const ws=document.querySelector('.workspace');
+  const main=root.querySelector('.main');
+  const sb=root.querySelector('.sidebar');
+  const ca=document.getElementById('chartArea');
+  const si=(el,p,v)=>el?.style.setProperty(p,v,'important');
+  const ri=(el,...ps)=>ps.forEach(p=>el?.style.removeProperty(p));
+  si(app,'height','auto');
+  si(ws,'height','auto');si(ws,'overflow','visible');
+  si(root,'flex','none');si(root,'height','auto');si(root,'overflow','visible');si(root,'width','max-content');si(root,'min-width','1400px');
+  si(main,'overflow','visible');si(main,'height','auto');
+  si(sb,'overflow','visible');si(sb,'height','auto');si(sb,'max-height','none');
+  si(ca,'overflow','visible');si(ca,'height','auto');si(ca,'max-height','none');
+  si(document.body,'overflow','visible');
+  void root.offsetHeight;
+  const fullW=root.scrollWidth;
+  const fullH=root.scrollHeight;
+  let canvas;
+  try{
+    canvas=await html2canvas(root,{
+      backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,
+      width:fullW,height:fullH,windowWidth:fullW,windowHeight:fullH
+    });
+  }finally{
+    ri(app,'height');
+    ri(ws,'height','overflow');
+    ri(root,'flex','height','overflow','width','min-width');
+    ri(main,'overflow','height');
+    ri(sb,'overflow','height','max-height');
+    ri(ca,'overflow','height','max-height');
+    ri(document.body,'overflow');
+  }
+  return canvas;
+}
+
 async function exportPdf(){
   if(!selectedChart)return;
-  const exportRoot=document.getElementById('pdfExportRoot');
-  if(!exportRoot)return;
+  closeModal();
   try{
     flashMessage='Generating PDF…';
     render();
-    await new Promise(resolve=>setTimeout(resolve,50));
-    const {html2canvas,jsPDF}=await loadPdfTools();
-    const liveRoot=document.getElementById('pdfExportRoot');
-    const canvas=await html2canvas(liveRoot,{
-      backgroundColor:'#e9ecef',
-      scale:2,
-      useCORS:true,
-      scrollX:0,
-      scrollY:0,
-      windowWidth:Math.max(window.innerWidth,liveRoot.scrollWidth+80),
-      windowHeight:Math.max(window.innerHeight,liveRoot.scrollHeight+80),
-      onclone(doc){
-        const cloneRoot=doc.getElementById('pdfExportRoot');
-        const cloneMain=cloneRoot?.querySelector('.main');
-        const cloneSidebar=cloneRoot?.querySelector('.sidebar');
-        const cloneChartArea=doc.getElementById('chartArea');
-        if(cloneRoot){
-          cloneRoot.style.width='max-content';
-          cloneRoot.style.minWidth='1400px';
-        }
-        if(cloneMain)cloneMain.style.overflow='visible';
-        if(cloneSidebar){
-          cloneSidebar.style.overflow='visible';
-          cloneSidebar.style.maxHeight='none';
-          cloneSidebar.style.height='auto';
-        }
-        if(cloneChartArea){
-          cloneChartArea.style.overflow='visible';
-          cloneChartArea.style.maxHeight='none';
-          cloneChartArea.style.height='auto';
-        }
-        doc.body.style.overflow='visible';
-      }
-    });
+    await new Promise(resolve=>setTimeout(resolve,80));
+    const {jsPDF}=await loadPdfTools();
+    const canvas=await captureFullChart();
     const orientation=canvas.width>canvas.height?'landscape':'portrait';
     const pdf=new jsPDF({orientation,unit:'pt',format:'a4'});
-    const pageWidth=pdf.internal.pageSize.getWidth();
-    const pageHeight=pdf.internal.pageSize.getHeight();
-    const margin=20;
-    const printableWidth=pageWidth-(margin*2);
-    const printableHeight=pageHeight-(margin*2);
-    const scale=printableWidth/canvas.width;
-    const pageSliceHeight=Math.max(1,Math.floor(printableHeight/scale));
-    let offsetY=0;
-    let pageIndex=0;
-    while(offsetY<canvas.height){
-      const sliceHeight=Math.min(pageSliceHeight,canvas.height-offsetY);
-      const sliceCanvas=document.createElement('canvas');
-      sliceCanvas.width=canvas.width;
-      sliceCanvas.height=sliceHeight;
-      const sliceContext=sliceCanvas.getContext('2d');
-      sliceContext.drawImage(canvas,0,offsetY,canvas.width,sliceHeight,0,0,canvas.width,sliceHeight);
-      if(pageIndex>0)pdf.addPage();
-      pdf.addImage(sliceCanvas.toDataURL('image/png'),'PNG',margin,margin,printableWidth,sliceHeight*scale);
-      offsetY+=sliceHeight;
-      pageIndex+=1;
+    const pageW=pdf.internal.pageSize.getWidth();
+    const pageH=pdf.internal.pageSize.getHeight();
+    const margin=20,printW=pageW-margin*2,printH=pageH-margin*2;
+    const scale=printW/canvas.width;
+    const sliceH=Math.max(1,Math.floor(printH/scale));
+    let y=0,page=0;
+    while(y<canvas.height){
+      const h=Math.min(sliceH,canvas.height-y);
+      const sc=document.createElement('canvas');
+      sc.width=canvas.width;sc.height=h;
+      sc.getContext('2d').drawImage(canvas,0,y,canvas.width,h,0,0,canvas.width,h);
+      if(page>0)pdf.addPage();
+      pdf.addImage(sc.toDataURL('image/png'),'PNG',margin,margin,printW,h*scale);
+      y+=h;page++;
     }
     pdf.save(`${chartTitleForFile()}.pdf`);
     flashMessage=`Saved ${selectedChart.title} as PDF.`;
-    render();
-  }catch(error){
-    flashMessage=`Could not export PDF. ${error.message||error}`;
-    render();
+  }catch(err){
+    flashMessage=`Could not export PDF. ${err.message||err}`;
   }
+  render();
 }
 
 function showTip(event,id){
@@ -923,31 +953,26 @@ function openExportModal(){
 
 async function exportPng(){
   if(!selectedChart)return;
-  const exportRoot=document.getElementById('pdfExportRoot');
-  if(!exportRoot)return;
+  closeModal();
   try{
     flashMessage='Generating PNG…';
     render();
-    await new Promise(resolve=>setTimeout(resolve,50));
-    const {html2canvas}=await loadPdfTools();
-    const liveRoot=document.getElementById('pdfExportRoot');
-    const canvas=await html2canvas(liveRoot,{backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:Math.max(window.innerWidth,liveRoot.scrollWidth+80),windowHeight:Math.max(window.innerHeight,liveRoot.scrollHeight+80)});
+    await new Promise(resolve=>setTimeout(resolve,80));
+    const canvas=await captureFullChart();
     const link=document.createElement('a');
     link.href=canvas.toDataURL('image/png');
     link.download=`${chartTitleForFile()}.png`;
     link.click();
-    closeModal();
     flashMessage=`Saved ${selectedChart.title} as PNG.`;
-    render();
-  }catch(error){
-    flashMessage=`Could not export PNG. ${error.message||error}`;
-    render();
+  }catch(err){
+    flashMessage=`Could not export PNG. ${err.message||err}`;
   }
+  render();
 }
 
 function exportHtmlSnapshot(){
   if(!selectedChart)return;
-  const styles=Array.from(document.querySelectorAll('style')).map(style=>style.outerHTML).join('\n');
+  const styles=Array.from(document.querySelectorAll('style')).map(style=>style.outerHTML).join('\n')+'<style>body{overflow:auto!important}.app{height:auto!important}#pdfExportRoot{flex:none!important;height:auto!important;overflow:visible!important}.workspace{height:auto!important;overflow:visible!important}.main{overflow:visible!important;height:auto!important;min-height:0!important}.sidebar{overflow:visible!important;max-height:none!important;height:auto!important}.chart-area{overflow-x:auto!important;overflow-y:visible!important;max-height:none!important;height:auto!important}</style>';
   const standaloneTitle=selectedChart.title;
   const standaloneProjects=Object.fromEntries(Object.entries(projects).map(([name,project])=>[name,{name,color:project.color,bg:project.bg,position:project.position??0}]));
   const standaloneTasks=tasks.map(task=>({
@@ -988,7 +1013,7 @@ const app=document.getElementById('app');
 function normalizeTask(task){const startDate=task.startDate||task.start_date||task.date;const endDate=task.endDate||task.end_date||startDate;const safeEnd=parseDate(endDate)<parseDate(startDate)?startDate:endDate;return{id:task.id||crypto.randomUUID(),task:task.task||'',description:task.description||'',outputs:task.outputs||'',project:task.project||Object.keys(projects)[0]||'Project 1',delivery:Boolean(task.delivery),done:Boolean(task.done),startDate,endDate:safeEnd}};
 function saveState(){safeWrite(STORAGE_KEY,{title,projects,tasks});}
 function sortTasks(){tasks.sort((a,b)=>getTaskStart(a).localeCompare(getTaskStart(b))||getTaskEnd(a).localeCompare(getTaskEnd(b))||a.task.localeCompare(b.task));}
-function syncFilters(){filterProjects=new Set([...filterProjects].filter(name=>projects[name]));if(!filterProjects.size)filterProjects=new Set(Object.keys(projects));}
+function syncFilters(){filterProjects=new Set([...filterProjects].filter(name=>projects[name]));}
 function getTaskStart(task){return task.startDate}
 function getTaskEnd(task){return task.endDate}
 function taskDuration(task){return Math.max(1,Math.floor((parseDate(getTaskEnd(task))-parseDate(getTaskStart(task)))/DAY_MS)+1)}
@@ -999,7 +1024,7 @@ function dateWindow(){if(!tasks.length){const year=new Date().getUTCFullYear();c
 function getMonths(startDate,endDate){const months=[];let year=startDate.getUTCFullYear(),month=startDate.getUTCMonth();while(Date.UTC(year,month,1)<=endDate.getTime()){const monthStart=new Date(Date.UTC(year,month,1)),nextStart=new Date(Date.UTC(year,month+1,1)),visibleStart=monthStart.getTime()<startDate.getTime()?startDate:monthStart,visibleEnd=nextStart.getTime()>endDate.getTime()?new Date(endDate.getTime()+DAY_MS):nextStart;months.push({label:monthStart.toLocaleDateString('en-US',{month:'short',year:'2-digit',timeZone:'UTC'}),days:Math.ceil((visibleEnd-visibleStart)/DAY_MS)});month+=1;if(month===12){month=0;year+=1}}return months}
 function dayOffset(ds,startDate){return Math.floor((parseDate(ds)-startDate)/DAY_MS)}
 async function loadPdfTools(){if(!exportPdfPromise){exportPdfPromise=Promise.all([import('https://esm.sh/html2canvas@1.4.1'),import('https://esm.sh/jspdf@2.5.1')]).then(([canvasModule,pdfModule])=>({html2canvas:canvasModule.default||canvasModule.html2canvas||canvasModule,jsPDF:pdfModule.jsPDF||(pdfModule.default&&pdfModule.default.jsPDF)||pdfModule.default}))}return exportPdfPromise}
-function render(){sortTasks();saveState();syncFilters();const filtered=filteredTasks();const {startDate,endDate,totalDays}=dateWindow();const months=getMonths(startDate,endDate);const chartWidth=totalDays*DAY_W;const today=parseDate(fmtDate(new Date()));const todayOff=Math.floor((today-startDate)/DAY_MS);app.innerHTML=\`<div id="pdfExportRoot"><div class="toolbar"><h2>${'${'}esc(title)}</h2><span class="toolbar-gap"></span><button class="btn ${'${'}showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button><button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">Standalone local editor. Changes save in this browser only.</div><div class="filters">${'${'}Object.entries(projects).map(([name,project])=>\`<button class="filter-chip ${'${'}filterProjects.has(name)?'on':''}" style="${'${'}filterProjects.has(name)?\`background:${'${'}project.color}33;color:${'${'}project.color};border-color:${'${'}project.color}55\`:''}" onclick='toggleProjectFilter(${ '${'}jsq(name)})'>${'${'}esc(name)}</button>\`).join('')}</div><div class="main"><div class="sidebar">${'${'}filtered.map(task=>\`<div class="sidebar-row ${'${'}task.delivery?'delivery':''} ${'${'}task.done?'done':''}" onclick='openTaskModal(${ '${'}jsq(task.id)})'><button class="row-check ${'${'}task.done?'done':''}" onclick='toggleDone(event,${ '${'}jsq(task.id)})'>✓</button><div class="dot" style="background:${'${'}(projects[task.project]||{}).color||'#666'}"></div><div class="label">${'${'}task.delivery?'🚩 ':''}${'${'}esc(task.task)}</div><div class="date">${'${'}taskRangeLabel(task)}</div></div>\`).join('')}${'${'}!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${'${'}months.map(month=>\`<div class="month-col" style="width:${'${'}month.days*DAY_W}px">${'${'}month.label}</div>\`).join('')}</div><div class="chart-body" style="width:${'${'}chartWidth}px;height:${'${'}Math.max(1,filtered.length)*ROW_H}px">${'${'}todayOff>=0&&todayOff<totalDays?\`<div class="today-line" style="left:${'${'}todayOff*DAY_W}px"></div><div class="today-label" style="left:${'${'}todayOff*DAY_W}px">TODAY</div>\`:''}${'${'}filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return\`<div class="chart-row"><div class="bar ${'${'}task.delivery?'delivery-bar':''} ${'${'}task.done?'done-bar':''}" style="left:${'${'}offset*DAY_W}px;width:${'${'}width}px;background:linear-gradient(135deg,${'${'}project.color},${'${'}project.bg})" onmouseenter='showTip(event,${ '${'}jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${ '${'}jsq(task.id)})'></div></div>\`}).join('')}</div></div></div><div class="legend">${'${'}Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>\`<div class="legend-item"><div class="legend-dot" style="background:${'${'}project.color}"></div>${'${'}esc(name)}</div>\`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>\`;const chartArea=document.getElementById('chartArea');if(chartArea&&todayOff>0)chartArea.scrollLeft=Math.max(0,todayOff*DAY_W-220)}
+function render(){sortTasks();saveState();syncFilters();const filtered=filteredTasks();const {startDate,endDate,totalDays}=dateWindow();const months=getMonths(startDate,endDate);const chartWidth=totalDays*DAY_W;const today=parseDate(fmtDate(new Date()));const todayOff=Math.floor((today-startDate)/DAY_MS);app.innerHTML=\`<div id="pdfExportRoot"><div class="toolbar"><h2>${'${'}esc(title)}</h2><span class="toolbar-gap"></span><button class="btn ${'${'}showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button><button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">Standalone local editor. Changes save in this browser only.</div><div class="filters"><button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;border-radius:999px" onclick="toggleSelectAllProjects()">${'${'}filterProjects.size===Object.keys(projects).length?'Deselect all':'Select all'}</button>${'${'}Object.entries(projects).map(([name,project])=>\`<button class="filter-chip ${'${'}filterProjects.has(name)?'on':''}" style="${'${'}filterProjects.has(name)?\`background:${'${'}project.color}33;color:${'${'}project.color};border-color:${'${'}project.color}55\`:''}" onclick='toggleProjectFilter(${ '${'}jsq(name)})'>${'${'}esc(name)}</button>\`).join('')}</div><div class="main"><div class="sidebar">${'${'}filtered.map(task=>\`<div class="sidebar-row ${'${'}task.delivery?'delivery':''} ${'${'}task.done?'done':''}" onclick='openTaskModal(${ '${'}jsq(task.id)})'><button class="row-check ${'${'}task.done?'done':''}" onclick='toggleDone(event,${ '${'}jsq(task.id)})'>✓</button><div class="dot" style="background:${'${'}(projects[task.project]||{}).color||'#666'}"></div><div class="label">${'${'}task.delivery?'🚩 ':''}${'${'}esc(task.task)}</div><div class="date">${'${'}taskRangeLabel(task)}</div></div>\`).join('')}${'${'}!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${'${'}months.map(month=>\`<div class="month-col" style="width:${'${'}month.days*DAY_W}px">${'${'}month.label}</div>\`).join('')}</div><div class="chart-body" style="width:${'${'}chartWidth}px;height:${'${'}Math.max(1,filtered.length)*ROW_H}px">${'${'}todayOff>=0&&todayOff<totalDays?\`<div class="today-line" style="left:${'${'}todayOff*DAY_W}px"></div><div class="today-label" style="left:${'${'}todayOff*DAY_W}px">TODAY</div>\`:''}${'${'}filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return\`<div class="chart-row"><div class="bar ${'${'}task.delivery?'delivery-bar':''} ${'${'}task.done?'done-bar':''}" style="left:${'${'}offset*DAY_W}px;width:${'${'}width}px;background:linear-gradient(135deg,${'${'}project.color},${'${'}project.bg})" onmouseenter='showTip(event,${ '${'}jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${ '${'}jsq(task.id)})'></div></div>\`}).join('')}</div></div></div><div class="legend">${'${'}Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>\`<div class="legend-item"><div class="legend-dot" style="background:${'${'}project.color}"></div>${'${'}esc(name)}</div>\`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>\`;const chartArea=document.getElementById('chartArea');if(chartArea&&todayOff>0)chartArea.scrollLeft=Math.max(0,todayOff*DAY_W-220)}
 function modalShell(){let overlay=document.getElementById('modal-overlay');if(!overlay){overlay=document.createElement('div');overlay.id='modal-overlay';document.body.appendChild(overlay)}overlay.className='modal-overlay';overlay.onclick=e=>{if(e.target===overlay)closeModal()};return overlay}
 function closeModal(){const overlay=document.getElementById('modal-overlay');if(overlay)overlay.remove();editTask=null}
 function openTaskModal(id){if(id===-1){const todayValue=fmtDate(parseDate(fmtDate(new Date())));editTask={id:crypto.randomUUID(),task:'',description:'',outputs:'',project:Object.keys(projects)[0]||'Project 1',startDate:todayValue,endDate:todayValue,delivery:false,done:false}}else{editTask=tasks.find(task=>task.id===id)}if(!editTask)return;const overlay=modalShell();overlay.innerHTML=\`<div class="modal"><h3>${'${'}tasks.some(task=>task.id===editTask.id)?'Edit block':'Add block'}</h3><label>Task</label><input id="m-task" value="${'${'}esc(editTask.task)}"><label>Description / details</label><textarea id="m-desc">${'${'}esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out">${'${'}esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${'${'}getTaskStart(editTask)}"><label>End date</label><input id="m-end" type="date" value="${'${'}getTaskEnd(editTask)}"><label>Project</label><select id="m-proj">${'${'}Object.keys(projects).map(name=>\`<option value="${'${'}esc(name)}" ${'${'}name===editTask.project?'selected':''}>${'${'}esc(name)}</option>\`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${'${'}editTask.delivery?'checked':''}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${'${'}editTask.done?'checked':''}> ✓ Mark as done</label><div class="modal-buttons">${'${'}tasks.some(task=>task.id===editTask.id)?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button>':''}<button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="saveTask()">Save</button></div></div>\`}
@@ -1012,14 +1037,16 @@ function renameProject(oldName){const input=document.getElementById(\`rename-${'
 function updateProjectColor(name){const input=document.getElementById(\`color-${'${'}encodeURIComponent(name)}\`);const color=normalizeHexColor(input?.value,projects[name].color);projects[name].color=color;projects[name].bg=darkenHexColor(color);openProjectsModal();render()}
 function removeProject(name){if(Object.keys(projects).length===1)return;tasks=tasks.filter(task=>task.project!==name);delete projects[name];syncFilters();openProjectsModal();render()}
 function toggleDeliveryOnly(){showDeliveryOnly=!showDeliveryOnly;render()}
-function toggleProjectFilter(name){const allNames=Object.keys(projects);const isVisible=filterProjects.has(name);if(filterProjects.size===allNames.length){filterProjects=new Set([name])}else if(filterProjects.size===1&&isVisible){filterProjects=new Set(allNames)}else if(isVisible){filterProjects.delete(name);if(!filterProjects.size)filterProjects=new Set(allNames)}else{filterProjects.add(name)}render()}
+function toggleProjectFilter(name){if(filterProjects.has(name)){filterProjects.delete(name);if(!filterProjects.size)filterProjects=new Set(Object.keys(projects));}else{filterProjects.add(name);}render()}
+function toggleSelectAllProjects(){const allNames=Object.keys(projects);if(filterProjects.size===allNames.length){filterProjects=new Set();}else{filterProjects=new Set(allNames);}render()}
 function showTip(event,id){const task=tasks.find(item=>item.id===id);if(!task)return;let tip=document.getElementById('tooltip');if(!tip){tip=document.createElement('div');tip.id='tooltip';tip.className='tooltip';document.body.appendChild(tip)}const project=projects[task.project]||{};tip.innerHTML=\`<div class="tt-title">${'${'}task.delivery?'🚩 ':''}${'${'}esc(task.task)}</div><div class="tt-date">${'${'}taskFullRange(task)}${'${'}taskDuration(task)>1?\` (${'${'}taskDuration(task)} days)\`:''}</div><div class="tt-proj" style="color:${'${'}project.color||'#999'}">${'${'}esc(task.project)}</div><div class="tt-proj">${'${'}task.done?'Done':'To do'}</div>${'${'}task.description?\`<div class="tt-block">${'${'}esc(task.description)}</div>\`:''}${'${'}task.outputs?\`<div class="tt-block"><strong>Outputs / paths</strong>\n${'${'}esc(task.outputs)}</div>\`:''}\`;tip.style.display='block';tip.style.left=Math.min(event.clientX+12,window.innerWidth-330)+'px';tip.style.top=Math.max(16,event.clientY-60)+'px'}
 function hideTip(){const tip=document.getElementById('tooltip');if(tip)tip.style.display='none'}
 function openExportModal(){const overlay=modalShell();overlay.innerHTML='<div class="modal"><h3>Export chart</h3><p>Export the current visible chart view as PDF, PNG, CSV, or done-only CSV.</p><div class="modal-buttons" style="justify-content:flex-start"><button class="btn" onclick="exportPdf()">PDF</button><button class="btn" onclick="exportPng()">PNG</button><button class="btn" onclick="exportCsv(false)">CSV</button><button class="btn" onclick="exportCsv(true)">Done CSV</button><button class="btn" onclick="closeModal()">Close</button></div></div>'}
 function exportCsv(doneOnly){const rows=(doneOnly?tasks.filter(task=>task.done):tasks).slice().sort((a,b)=>getTaskStart(a).localeCompare(getTaskStart(b))||getTaskEnd(a).localeCompare(getTaskEnd(b))||a.task.localeCompare(b.task));let csv='Start Date,End Date,Task,Description,Outputs,Project,Delivery,Status\\n';rows.forEach(task=>{csv+=\`${'${'}escapeCsv(getTaskStart(task))},${'${'}escapeCsv(getTaskEnd(task))},${'${'}escapeCsv(task.task)},${'${'}escapeCsv(task.description)},${'${'}escapeCsv(task.outputs)},${'${'}escapeCsv(task.project)},${'${'}escapeCsv(task.delivery?'DELIVER':'')},${'${'}escapeCsv(task.done?'Done':'To do')}\\n\`});const blob=new Blob([csv],{type:'text/csv'}),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=\`${'${'}slug(title)}${'${'}doneOnly?'_done':''}.csv\`;link.click()}
-async function exportPng(){const root=document.getElementById('pdfExportRoot');const {html2canvas}=await loadPdfTools();const canvas=await html2canvas(root,{backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:Math.max(window.innerWidth,root.scrollWidth+80),windowHeight:Math.max(window.innerHeight,root.scrollHeight+80)});const link=document.createElement('a');link.href=canvas.toDataURL('image/png');link.download=\`${'${'}slug(title)}.png\`;link.click();closeModal()}
-async function exportPdf(){const root=document.getElementById('pdfExportRoot');const {html2canvas,jsPDF}=await loadPdfTools();const canvas=await html2canvas(root,{backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,windowWidth:Math.max(window.innerWidth,root.scrollWidth+80),windowHeight:Math.max(window.innerHeight,root.scrollHeight+80)});const orientation=canvas.width>canvas.height?'landscape':'portrait';const pdf=new jsPDF({orientation,unit:'pt',format:'a4'});const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=20,printableWidth=pageWidth-(margin*2),printableHeight=pageHeight-(margin*2),scale=printableWidth/canvas.width,pageSliceHeight=Math.max(1,Math.floor(printableHeight/scale));let offsetY=0,pageIndex=0;while(offsetY<canvas.height){const sliceHeight=Math.min(pageSliceHeight,canvas.height-offsetY),sliceCanvas=document.createElement('canvas');sliceCanvas.width=canvas.width;sliceCanvas.height=sliceHeight;const sliceContext=sliceCanvas.getContext('2d');sliceContext.drawImage(canvas,0,offsetY,canvas.width,sliceHeight,0,0,canvas.width,sliceHeight);if(pageIndex>0)pdf.addPage();pdf.addImage(sliceCanvas.toDataURL('image/png'),'PNG',margin,margin,printableWidth,sliceHeight*scale);offsetY+=sliceHeight;pageIndex+=1}pdf.save(\`${'${'}slug(title)}.pdf\`);closeModal()}
-window.openTaskModal=openTaskModal;window.saveTask=saveTask;window.deleteTask=deleteTask;window.toggleDone=toggleDone;window.openProjectsModal=openProjectsModal;window.addProject=addProject;window.renameProject=renameProject;window.updateProjectColor=updateProjectColor;window.removeProject=removeProject;window.toggleDeliveryOnly=toggleDeliveryOnly;window.toggleProjectFilter=toggleProjectFilter;window.showTip=showTip;window.hideTip=hideTip;window.openExportModal=openExportModal;window.exportCsv=exportCsv;window.exportPng=exportPng;window.exportPdf=exportPdf;window.closeModal=closeModal;render();})();`;
+async function captureFullChart(){const {html2canvas}=await loadPdfTools();const root=document.getElementById('pdfExportRoot');if(!root)throw new Error('Chart root not found');const si=(el,p,v)=>el?.style.setProperty(p,v,'important');const ri=(el,...ps)=>ps.forEach(p=>el?.style.removeProperty(p));const ws=document.querySelector('.workspace');const main=root.querySelector('.main');const sb=root.querySelector('.sidebar');const ca=document.getElementById('chartArea');si(ws,'height','auto');si(ws,'overflow','visible');si(root,'flex','none');si(root,'height','auto');si(root,'overflow','visible');si(root,'width','max-content');si(root,'min-width','1400px');si(main,'overflow','visible');si(main,'height','auto');si(sb,'overflow','visible');si(sb,'height','auto');si(sb,'max-height','none');si(ca,'overflow','visible');si(ca,'height','auto');si(ca,'max-height','none');si(document.body,'overflow','visible');void root.offsetHeight;const fullW=root.scrollWidth,fullH=root.scrollHeight;let canvas;try{canvas=await html2canvas(root,{backgroundColor:'#e9ecef',scale:2,useCORS:true,scrollX:0,scrollY:0,width:fullW,height:fullH,windowWidth:fullW,windowHeight:fullH});}finally{ri(ws,'height','overflow');ri(root,'flex','height','overflow','width','min-width');ri(main,'overflow','height');ri(sb,'overflow','height','max-height');ri(ca,'overflow','height','max-height');ri(document.body,'overflow');}return canvas}
+async function exportPng(){closeModal();const canvas=await captureFullChart();const link=document.createElement('a');link.href=canvas.toDataURL('image/png');link.download=\`${'${'}slug(title)}.png\`;link.click()}
+async function exportPdf(){closeModal();const canvas=await captureFullChart();const {jsPDF}=await loadPdfTools();const orientation=canvas.width>canvas.height?'landscape':'portrait';const pdf=new jsPDF({orientation,unit:'pt',format:'a4'});const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=20,printableWidth=pageWidth-(margin*2),printableHeight=pageHeight-(margin*2),scale=printableWidth/canvas.width,pageSliceHeight=Math.max(1,Math.floor(printableHeight/scale));let offsetY=0,pageIndex=0;while(offsetY<canvas.height){const sliceHeight=Math.min(pageSliceHeight,canvas.height-offsetY),sliceCanvas=document.createElement('canvas');sliceCanvas.width=canvas.width;sliceCanvas.height=sliceHeight;sliceCanvas.getContext('2d').drawImage(canvas,0,offsetY,canvas.width,sliceHeight,0,0,canvas.width,sliceHeight);if(pageIndex>0)pdf.addPage();pdf.addImage(sliceCanvas.toDataURL('image/png'),'PNG',margin,margin,printableWidth,sliceHeight*scale);offsetY+=sliceHeight;pageIndex+=1}pdf.save(\`${'${'}slug(title)}.pdf\`)}
+window.openTaskModal=openTaskModal;window.saveTask=saveTask;window.deleteTask=deleteTask;window.toggleDone=toggleDone;window.openProjectsModal=openProjectsModal;window.addProject=addProject;window.renameProject=renameProject;window.updateProjectColor=updateProjectColor;window.removeProject=removeProject;window.toggleDeliveryOnly=toggleDeliveryOnly;window.toggleProjectFilter=toggleProjectFilter;window.toggleSelectAllProjects=toggleSelectAllProjects;window.showTip=showTip;window.hideTip=hideTip;window.openExportModal=openExportModal;window.exportCsv=exportCsv;window.exportPng=exportPng;window.exportPdf=exportPdf;window.closeModal=closeModal;render();})();`;
   const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${esc(selectedChart.title)}</title>${styles}</head><body><div id="app"></div>${dataScript}<script>${appCode.replace(/<\/script>/g,'<\\/script>')}<\/script></body></html>`;
   const filename=`${chartTitleForFile()}.html`;
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});
@@ -1180,18 +1207,20 @@ function toggleDeliveryOnly(){
 }
 
 function toggleProjectFilter(name){
-  const allNames=Object.keys(projects);
-  const isVisible=filterProjects.has(name);
-  const showingAll=filterProjects.size===allNames.length;
-  if(showingAll){
-    filterProjects=new Set([name]);
-  }else if(filterProjects.size===1){
-    filterProjects=isVisible?new Set(allNames):new Set([name]);
-  }else if(isVisible){
-    filterProjects=new Set([name]);
+  if(filterProjects.has(name)){
+    filterProjects.delete(name);
+    if(!filterProjects.size)filterProjects=new Set(Object.keys(projects));
   }else{
     filterProjects.add(name);
   }
+  rememberChartView();
+  render();
+}
+
+function toggleSelectAllProjects(){
+  const allNames=Object.keys(projects);
+  if(filterProjects.size===allNames.length){filterProjects=new Set();}
+  else{filterProjects=new Set(allNames);}
   rememberChartView();
   render();
 }
@@ -1229,6 +1258,7 @@ window.refreshCharts=refreshCharts;
 window.selectChart=selectChart;
 window.toggleDeliveryOnly=toggleDeliveryOnly;
 window.toggleProjectFilter=toggleProjectFilter;
+window.toggleSelectAllProjects=toggleSelectAllProjects;
 window.openChartCreateModal=openChartCreateModal;
 window.createChart=createChart;
 window.openChartModal=openChartModal;
@@ -1260,6 +1290,47 @@ window.hideTip=hideTip;
 
 window.addEventListener('pageshow',()=>{if(user)resumePlannerView()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&user)resumePlannerView()});
+
+(function initMascot(){
+  const messages=[
+    "The secret of getting ahead is getting started. — Mark Twain",
+    "It always seems impossible until it's done. — Nelson Mandela",
+    "Don't watch the clock; do what it does. Keep going. — Sam Levenson",
+    "You don't have to be great to start, but you have to start to be great. — Zig Ziglar",
+    "Hard work beats talent when talent doesn't work hard. — Tim Notke",
+    "Believe you can and you're halfway there. — Theodore Roosevelt",
+    "Success is the sum of small efforts repeated day in and day out. — Robert Collier",
+    "The future depends on what you do today. — Mahatma Gandhi",
+    "You are never too old to set another goal or to dream a new dream. — C.S. Lewis",
+    "Start where you are. Use what you have. Do what you can. — Arthur Ashe",
+    "What you do today can improve all your tomorrows. — Ralph Marston",
+    "Little by little, a little becomes a lot. — Tanzanian proverb",
+    "Energy and persistence conquer all things. — Benjamin Franklin",
+    "Do something today that your future self will thank you for.",
+    "Progress, not perfection. 🐾",
+    "One step at a time is all it takes to get you there.",
+    "Great things are done by a series of small things brought together. — Van Gogh",
+    "Push yourself, because no one else is going to do it for you.",
+    "Dream it. Wish it. Do it.",
+    "The harder you work for something, the greater you'll feel when you achieve it.",
+  ];
+  let idx=Math.floor(Math.random()*messages.length);
+  let timer=null;
+  function showBubble(msg){
+    const bubble=document.getElementById('mascot-bubble');
+    if(!bubble)return;
+    bubble.textContent=msg;
+    bubble.classList.add('show');
+    clearTimeout(timer);
+    timer=setTimeout(()=>bubble.classList.remove('show'),4000);
+  }
+  window.mascotSpeak=function(){
+    idx=(idx+1)%messages.length;
+    showBubble(messages[idx]);
+  };
+  setTimeout(()=>showBubble(messages[idx]),2000);
+  setInterval(()=>{idx=(idx+1)%messages.length;showBubble(messages[idx]);},18000);
+})();
 
 init();
 </script>
