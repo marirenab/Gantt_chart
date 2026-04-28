@@ -30,6 +30,10 @@ button,input,select,textarea{font:inherit}
 .field textarea{min-height:92px;resize:vertical}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:11px;border:1px solid var(--border);background:var(--surface2);color:var(--text2)}
 .flash{margin-top:14px;padding:10px 12px;border-radius:10px;background:#dbeafe;color:#1d4ed8;font-size:13px}
+#toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10000;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:500;box-shadow:0 4px 18px rgba(0,0,0,.18);pointer-events:none;opacity:0;transition:opacity .2s;white-space:nowrap}
+#toast.show{opacity:1}
+#toast.ok{background:#d1fae5;color:#065f46}
+#toast.err{background:#fee2e2;color:#991b1b}
 .shell{display:grid;grid-template-columns:310px 1fr;height:100vh}
 .nav{display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--surface)}
 .nav-top{padding:18px 18px 12px;border-bottom:1px solid var(--border)}
@@ -139,6 +143,7 @@ button,input,select,textarea{font:inherit}
 </head>
 <body>
 <div id="app"></div>
+<div id="toast"></div>
 <div id="mascot" onclick="mascotSpeak()" title="Click me!">
   <div id="mascot-bubble"></div>
   <svg id="mascot-face" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
@@ -477,7 +482,7 @@ function dayOffset(ds,startDate){
 function getTaskStart(task){return task.startDate}
 function getTaskEnd(task){return task.endDate}
 function taskDuration(task){return Math.max(1,Math.floor((parseDate(getTaskEnd(task))-parseDate(getTaskStart(task)))/DAY_MS)+1)}
-function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start.slice(5):`${start.slice(5)}→${end.slice(5)}`}
+function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start.slice(2):`${start.slice(2)}→${end.slice(2)}`}
 function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start:`${start} to ${end}`}
 function chartTitleForFile(){return(selectedChart?.title||'gantt_chart').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'gantt_chart'}
 
@@ -661,7 +666,8 @@ async function addProject(){
   const color=normalizeHexColor(colorInput?.value,palette.color);
   const bg=darkenHexColor(color);
   const {error}=await supabase.from('projects').insert({chart_id:selectedChart.id,name,color,bg,position});
-  if(error){flashMessage=error.message;render();return}
+  if(error){showToast(`Add project failed: ${error.message}`,'err');flashMessage=`Add project failed: ${error.message}`;render();return}
+  showToast(`Project "${name}" added ✓`);
   await loadSelectedChart();
   renderProjectsModal();
   render();
@@ -709,7 +715,7 @@ async function renameProject(oldName){
   }
   const deleteProjectResult=await supabase.from('projects').delete().eq('chart_id',selectedChart.id).eq('name',oldName);
   if(deleteProjectResult.error){flashMessage=deleteProjectResult.error.message;render();return}
-  flashMessage=`Renamed "${oldName}" to "${newName}".`;
+  showToast(`Renamed "${oldName}" → "${newName}" ✓`);
   await loadSelectedChart();
   renderProjectsModal();
   render();
@@ -721,8 +727,8 @@ async function updateProjectColor(name){
   const color=normalizeHexColor(colorInput?.value,projects[name].color);
   const bg=darkenHexColor(color);
   const {error}=await supabase.from('projects').update({color,bg}).eq('chart_id',selectedChart.id).eq('name',name);
-  if(error){flashMessage=error.message;render();return}
-  flashMessage=`Updated color for "${name}".`;
+  if(error){showToast(`Color update failed: ${error.message}`,'err');render();return}
+  showToast(`Color updated ✓`);
   await loadSelectedChart();
   renderProjectsModal();
   render();
@@ -741,13 +747,22 @@ async function saveTask(){
   if(!taskValue||!startDate||!endDateInput||!project)return;
   const safeEnd=parseDate(endDateInput)<parseDate(startDate)?startDate:endDateInput;
   const payload={chart_id:selectedChart.id,task:taskValue,description,outputs,project,start_date:startDate,end_date:safeEnd,delivery,done};
-  const request=editTask.id==='new'
-    ? supabase.from('tasks').insert(payload)
-    : supabase.from('tasks').update(payload).eq('id',editTask.id);
-  const {error}=await request;
-  if(error){flashMessage=error.message;render();return}
-  closeModal();
-  await loadSelectedChart();
+  const btn=document.querySelector('#modal-overlay .btn-primary');
+  if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  try{
+    const request=editTask.id==='new'
+      ? supabase.from('tasks').insert(payload)
+      : supabase.from('tasks').update(payload).eq('id',editTask.id);
+    const {error}=await request;
+    if(error)throw new Error(error.message);
+    closeModal();
+    await loadSelectedChart();
+    showToast('Block saved ✓');
+  }catch(err){
+    showToast(`Save failed: ${err.message}`,'err');
+    flashMessage=`Save failed: ${err.message}`;
+    if(btn){btn.disabled=false;btn.textContent='Save';}
+  }
   render();
 }
 
@@ -808,13 +823,13 @@ function exportCsv(doneOnly){
 }
 
 function buildGanttCanvas(){
-  const S=2;
   const filtered=filteredTasks();
   if(!filtered.length)throw new Error('No tasks to export. Add some blocks first.');
   const {startDate,endDate,totalDays}=dateWindow();
   const months=getMonths(startDate,endDate);
   const SB=340,DW=DAY_W,RH=ROW_H,TH=44,MH=28,LH=36;
   const CW=totalDays*DW,W=SB+CW,H=TH+MH+filtered.length*RH+LH;
+  const S=Math.max(1,Math.min(2,Math.floor(8000/Math.max(W,H))));
   const cv=document.createElement('canvas');
   cv.width=W*S;cv.height=H*S;
   const ctx=cv.getContext('2d');
@@ -1045,7 +1060,7 @@ function syncFilters(){filterProjects=new Set([...filterProjects].filter(name=>p
 function getTaskStart(task){return task.startDate}
 function getTaskEnd(task){return task.endDate}
 function taskDuration(task){return Math.max(1,Math.floor((parseDate(getTaskEnd(task))-parseDate(getTaskStart(task)))/DAY_MS)+1)}
-function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start.slice(5):\`${'${'}start.slice(5)}→${'${'}end.slice(5)}\`}
+function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start.slice(2):\`${'${'}start.slice(2)}→${'${'}end.slice(2)}\`}
 function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start:\`${'${'}start} to ${'${'}end}\`}
 function filteredTasks(){let filtered=tasks.filter(task=>filterProjects.has(task.project));if(showDeliveryOnly)filtered=filtered.filter(task=>task.delivery);return filtered}
 function dateWindow(){if(!tasks.length){const year=new Date().getUTCFullYear();const startDate=parseDate(\`${'${'}year}-01-01\`),endDate=parseDate(\`${'${'}year+1}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}const starts=tasks.map(task=>getTaskStart(task)).sort();const ends=tasks.map(task=>getTaskEnd(task)).sort();const startYear=parseDate(starts[0]).getUTCFullYear();const endYear=parseDate(ends[ends.length-1]).getUTCFullYear();const startDate=parseDate(\`${'${'}startYear}-01-01\`),endDate=parseDate(\`${'${'}endYear}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}
@@ -1111,6 +1126,16 @@ function closeModal(){
   if(overlay)overlay.remove();
   editTask=null;
   importFile=null;
+}
+
+let _toastTimer=null;
+function showToast(msg,type='ok'){
+  const t=document.getElementById('toast');
+  if(!t)return;
+  clearTimeout(_toastTimer);
+  t.textContent=msg;
+  t.className=`show ${type}`;
+  _toastTimer=setTimeout(()=>{t.className='';},3000);
 }
 
 function captureImportFile(event){
@@ -1319,6 +1344,7 @@ window.exportPng=exportPng;
 window.exportHtmlSnapshot=exportHtmlSnapshot;
 window.showTip=showTip;
 window.hideTip=hideTip;
+window.showToast=showToast;
 
 window.addEventListener('pageshow',()=>{if(user)resumePlannerView()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&user)resumePlannerView()});
