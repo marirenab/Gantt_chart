@@ -120,6 +120,37 @@ button,input,select,textarea{font:inherit}
   .main{flex-direction:column}
   .sidebar{width:100%;min-width:0;max-height:38vh;border-right:none;border-bottom:1px solid var(--border)}
 }
+.nav-top-main{flex:1;min-width:0}
+.nav-collapsible{display:flex;flex-direction:column;flex:1;min-height:0;overflow:auto}
+.nav-mobile-toggle{display:none}
+@media (max-width:600px){
+  .nav{height:auto;overflow:visible}
+  .nav-top{display:flex;align-items:center;padding:12px 14px;gap:8px;flex-wrap:nowrap}
+  .nav-top p,.nav-top .nav-actions{display:none}
+  .nav-top h1{font-size:16px}
+  .nav.mobile-open .nav-top p{display:block}
+  .nav.mobile-open .nav-top .nav-actions{display:flex}
+  .nav-mobile-toggle{display:flex;align-items:center;justify-content:center;padding:7px 12px;font-size:18px;line-height:1;flex-shrink:0;cursor:pointer}
+  .nav-collapsible{display:none;max-height:55vh;overflow-y:auto}
+  .nav.mobile-open .nav-collapsible{display:flex}
+  .toolbar{overflow-x:auto;flex-wrap:nowrap;padding:8px 12px;gap:6px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .toolbar::-webkit-scrollbar{display:none}
+  .toolbar h2{flex-shrink:0;font-size:15px;white-space:nowrap}
+  .toolbar .pill,.toolbar .btn{flex-shrink:0;white-space:nowrap}
+  .toolbar-gap{min-width:2px;flex-shrink:0}
+  .toolbar-sub{padding:0 12px 8px!important;font-size:11px}
+  .filters{overflow-x:auto;flex-wrap:nowrap;padding:6px 10px;gap:4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .filters::-webkit-scrollbar{display:none}
+  .filter-chip{flex-shrink:0}
+  .sidebar{max-height:30vh}
+  .sidebar-row{height:40px}
+  .modal-overlay{align-items:flex-end;padding:0}
+  .modal{border-radius:20px 20px 0 0;width:100%;max-width:100%;max-height:88vh;padding:20px 16px 32px}
+  .grid-2{grid-template-columns:1fr}
+  #mascot{bottom:10px;right:12px}
+  #mascot-face{width:44px;height:44px}
+  #toast{max-width:90vw;white-space:normal;text-align:center}
+}
 #mascot{position:fixed;bottom:18px;right:22px;z-index:9999;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;user-select:none}
 #mascot-bubble{background:#fff;border:1.5px solid var(--border);border-radius:14px 14px 4px 14px;padding:8px 13px;font-size:12px;color:var(--text);max-width:180px;line-height:1.4;box-shadow:0 4px 16px rgba(0,0,0,.1);opacity:0;transform:translateY(4px) scale(.95);transition:opacity .25s,transform .25s;pointer-events:none}
 #mascot-bubble.show{opacity:1;transform:translateY(0) scale(1)}
@@ -614,7 +645,7 @@ function renderWorkspace(){
   const today=parseDate(fmtDate(new Date()));
   const todayOff=Math.floor((today-startDate)/DAY_MS);
   const mainContent=!selectedChart?`<div class="workspace-empty"><div class="empty-box"><h2 style="font-size:22px;letter-spacing:-.03em;margin-bottom:8px">No chart selected yet</h2><p class="muted">Create your first chart on the left. Each chart has its own tasks, projects, exports, and share list.</p></div></div>`:`<div id="pdfExportRoot"><div class="toolbar"><h2>${esc(selectedChart.title)}</h2><span class="pill">${selectedIsOwner()?'Owner':selectedRole==='editor'?'Shared editor':'Shared viewer'}</span><span class="toolbar-gap"></span><button class="btn ${showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button>${selectedCanEdit()?'<button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openImportModal()">Import CSV</button>':''}${selectedIsOwner()?'<button class="btn" onclick="openShareModal()">Share</button><button class="btn" onclick="openChartModal()">Chart settings</button>':''}<button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">${selectedCanEdit()?'Collaborators with editor access can also change this chart.':'This chart is read-only for your account.'}</div><div class="filters"><button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;border-radius:999px" onclick="toggleSelectAllProjects()">${filterProjects.size===Object.keys(projects).length?'Deselect all':'Select all'}</button>${Object.entries(projects).map(([name,project])=>`<button class="filter-chip ${filterProjects.has(name)?'on':''}" style="${filterProjects.has(name)?`background:${project.color}33;color:${project.color};border-color:${project.color}55`:''}" onclick='toggleProjectFilter(${jsq(name)})'>${esc(name)}</button>`).join('')}</div><div class="main"><div class="sidebar">${filtered.map(task=>`<div class="sidebar-row ${task.delivery?'delivery':''} ${task.done?'done':''}" onclick='openTaskModal(${jsq(task.id)})'><button class="row-check ${task.done?'done':''}" onclick='toggleDone(event,${jsq(task.id)})' title="${task.done?'Mark as not done':'Mark as done'}">✓</button><div class="dot" style="background:${(projects[task.project]||{}).color||'#666'}"></div><div class="label">${task.delivery?'🚩 ':''}${esc(task.task)}</div><div class="date">${taskRangeLabel(task)}</div></div>`).join('')}${!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${months.map(month=>`<div class="month-col" style="width:${month.days*DAY_W}px">${month.label}</div>`).join('')}</div><div class="chart-body" style="width:${chartWidth}px;height:${Math.max(1,filtered.length)*ROW_H}px">${todayOff>=0&&todayOff<totalDays?`<div class="today-line" style="left:${todayOff*DAY_W}px"></div><div class="today-label" style="left:${todayOff*DAY_W}px">TODAY</div>`:''}${filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return`<div class="chart-row"><div class="bar ${task.delivery?'delivery-bar':''} ${task.done?'done-bar':''}" style="left:${offset*DAY_W}px;width:${width}px;background:linear-gradient(135deg,${project.color},${project.bg})" onmouseenter='showTip(event,${jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${jsq(task.id)})'></div></div>`}).join('')}</div></div></div><div class="legend">${Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>`<div class="legend-item"><div class="legend-dot" style="background:${project.color}"></div>${esc(name)}</div>`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>`;
-  app.innerHTML=`<div class="shell"><aside class="nav"><div class="nav-top"><h1>Cloud <span>Gantt</span></h1><p>Multiple charts, login, and email-based sharing.</p><div class="nav-actions"><button class="btn btn-primary" onclick="openChartCreateModal()">+ New chart</button></div></div><div class="nav-section"><div class="nav-label">My charts</div><div class="chart-list">${owned.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">No owned charts yet.</div>'}</div></div><div class="nav-section"><div class="nav-label">Shared with me</div><div class="chart-list">${shared.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">Nothing shared yet.</div>'}</div></div><div class="nav-bottom"><div class="email">${esc(user.email||'')}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="refreshCharts()">Refresh</button><button class="btn" onclick="openPreferencesModal()">Preferences</button><button class="btn" onclick="signOut()">Sign out</button></div>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}</div></aside><main class="workspace">${chartLoading?'<div class="workspace-empty"><div class="empty-box"><p class="muted">Loading chart…</p></div></div>':mainContent}</main></div>`;
+  app.innerHTML=`<div class="shell"><aside class="nav"><div class="nav-top"><div class="nav-top-main"><h1>Cloud <span>Gantt</span></h1><p>Multiple charts, login, and email-based sharing.</p><div class="nav-actions"><button class="btn btn-primary" onclick="openChartCreateModal()">+ New chart</button></div></div><button class="nav-mobile-toggle btn btn-ghost" onclick="toggleMobileNav()" title="Toggle charts panel">☰</button></div><div class="nav-collapsible"><div class="nav-section"><div class="nav-label">My charts</div><div class="chart-list">${owned.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">No owned charts yet.</div>'}</div></div><div class="nav-section"><div class="nav-label">Shared with me</div><div class="chart-list">${shared.map(chart=>renderChartItem(chart)).join('')||'<div class="muted" style="padding:8px 12px">Nothing shared yet.</div>'}</div></div><div class="nav-bottom"><div class="email">${esc(user.email||'')}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="refreshCharts()">Refresh</button><button class="btn" onclick="openPreferencesModal()">Preferences</button><button class="btn" onclick="signOut()">Sign out</button></div>${flashMessage?`<div class="flash">${esc(flashMessage)}</div>`:''}</div></div></aside><main class="workspace">${chartLoading?'<div class="workspace-empty"><div class="empty-box"><p class="muted">Loading chart…</p></div></div>':mainContent}</main></div>`;
   const chartArea=document.getElementById('chartArea');
   if(chartArea&&todayOff>0)chartArea.scrollLeft=Math.max(0,todayOff*DAY_W-220);
 }
@@ -654,6 +685,38 @@ async function deleteChart(){
   closeModal();
   selectedChartId=null;
   await loadCharts(false);
+}
+
+async function duplicateChart(){
+  if(!selectedChart||!selectedIsOwner())return;
+  closeModal();
+  const newTitle=`Copy of ${selectedChart.title}`;
+  showToast('Duplicating chart…');
+  const {data:newChart,error:chartError}=await supabase.from('charts').insert({
+    title:newTitle,
+    description:selectedChart.description||'',
+    owner_id:user.id
+  }).select().single();
+  if(chartError){showToast(`Duplicate failed: ${chartError.message}`,'err');return}
+  const projectRows=Object.values(projects).map(p=>({
+    chart_id:newChart.id,name:p.name,color:p.color,bg:p.bg,position:p.position??0
+  }));
+  if(projectRows.length){
+    const {error:projError}=await supabase.from('projects').insert(projectRows);
+    if(projError){showToast(`Duplicate failed: ${projError.message}`,'err');return}
+  }
+  const taskRows=tasks.map(t=>({
+    chart_id:newChart.id,task:t.task,description:t.description,outputs:t.outputs,
+    project:t.project,start_date:getTaskStart(t),end_date:getTaskEnd(t),
+    delivery:t.delivery,done:t.done
+  }));
+  if(taskRows.length){
+    const {error:taskError}=await supabase.from('tasks').insert(taskRows);
+    if(taskError){showToast(`Duplicate failed: ${taskError.message}`,'err');return}
+  }
+  selectedChartId=newChart.id;
+  await loadCharts();
+  showToast(`Duplicated as "${newTitle}" ✓`);
 }
 
 async function addProject(){
@@ -772,6 +835,21 @@ async function deleteTask(){
   if(error){flashMessage=error.message;render();return}
   closeModal();
   await loadSelectedChart();
+  render();
+}
+
+async function duplicateTask(){
+  if(!selectedChart||!selectedCanEdit()||!editTask||editTask.id==='new')return;
+  const payload={
+    chart_id:selectedChart.id,task:editTask.task+' (copy)',description:editTask.description,
+    outputs:editTask.outputs,project:editTask.project,start_date:getTaskStart(editTask),
+    end_date:getTaskEnd(editTask),delivery:editTask.delivery,done:false
+  };
+  const {error}=await supabase.from('tasks').insert(payload);
+  if(error){showToast(`Duplicate failed: ${error.message}`,'err');return}
+  closeModal();
+  await loadSelectedChart();
+  showToast('Block duplicated ✓');
   render();
 }
 
@@ -961,7 +1039,7 @@ function openChartCreateModal(){
 function openChartModal(){
   if(!selectedChart||!selectedIsOwner())return;
   const overlay=modalShell();
-  overlay.innerHTML=`<div class="modal"><h3>Chart settings</h3><label>Title</label><input id="chart-title" value="${esc(selectedChart.title)}"><label>Description</label><textarea id="chart-description">${esc(selectedChart.description||'')}</textarea><div class="modal-buttons"><button class="btn btn-danger" onclick="deleteChart()">Delete chart</button><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveChartSettings()">Save</button></div></div>`;
+  overlay.innerHTML=`<div class="modal"><h3>Chart settings</h3><label>Title</label><input id="chart-title" value="${esc(selectedChart.title)}"><label>Description</label><textarea id="chart-description">${esc(selectedChart.description||'')}</textarea><div class="modal-buttons"><button class="btn btn-danger" onclick="deleteChart()">Delete chart</button><button class="btn" onclick="duplicateChart()">Duplicate chart</button><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveChartSettings()">Save</button></div></div>`;
 }
 
 function openProjectsModal(){
@@ -1118,7 +1196,7 @@ function openTaskModal(id){
   if(!editTask)return;
   const disabled=selectedCanEdit()?'':'disabled';
   const overlay=modalShell();
-  overlay.innerHTML=`<div class="modal"><h3>${editTask.id==='new'?'Add block':'Edit block'}</h3><label>Task</label><input id="m-task" value="${esc(editTask.task)}" ${disabled}><label>Description / details</label><textarea id="m-desc" placeholder="Add notes, links, context..." ${disabled}>${esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out" placeholder="Figures: /path/here&#10;Ppt: /path/here" ${disabled}>${esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${getTaskStart(editTask)}" ${disabled}><label>End date</label><input id="m-end" type="date" value="${getTaskEnd(editTask)}" ${disabled}><label>Project</label><select id="m-proj" ${disabled}>${Object.keys(projects).map(name=>`<option value="${esc(name)}" ${name===editTask.project?'selected':''}>${esc(name)}</option>`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${editTask.delivery?'checked':''} ${disabled}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${editTask.done?'checked':''} ${disabled}> ✓ Mark as done</label><div class="modal-buttons">${selectedCanEdit()&&editTask.id!=='new'?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button>':''}<button class="btn" onclick="closeModal()">Close</button>${selectedCanEdit()?'<button class="btn btn-primary" onclick="saveTask()">Save</button>':''}</div></div>`;
+  overlay.innerHTML=`<div class="modal"><h3>${editTask.id==='new'?'Add block':'Edit block'}</h3><label>Task</label><input id="m-task" value="${esc(editTask.task)}" ${disabled}><label>Description / details</label><textarea id="m-desc" placeholder="Add notes, links, context..." ${disabled}>${esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out" placeholder="Figures: /path/here&#10;Ppt: /path/here" ${disabled}>${esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${getTaskStart(editTask)}" ${disabled}><label>End date</label><input id="m-end" type="date" value="${getTaskEnd(editTask)}" ${disabled}><label>Project</label><select id="m-proj" ${disabled}>${Object.keys(projects).map(name=>`<option value="${esc(name)}" ${name===editTask.project?'selected':''}>${esc(name)}</option>`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${editTask.delivery?'checked':''} ${disabled}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${editTask.done?'checked':''} ${disabled}> ✓ Mark as done</label><div class="modal-buttons">${selectedCanEdit()&&editTask.id!=='new'?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button><button class="btn" onclick="duplicateTask()">Duplicate</button>':''}<button class="btn" onclick="closeModal()">Close</button>${selectedCanEdit()?'<button class="btn btn-primary" onclick="saveTask()">Save</button>':''}</div></div>`;
 }
 
 function closeModal(){
@@ -1321,6 +1399,7 @@ window.createChart=createChart;
 window.openChartModal=openChartModal;
 window.saveChartSettings=saveChartSettings;
 window.deleteChart=deleteChart;
+window.duplicateChart=duplicateChart;
 window.openProjectsModal=openProjectsModal;
 window.addProject=addProject;
 window.updateProjectColor=updateProjectColor;
@@ -1336,6 +1415,7 @@ window.runImport=runImport;
 window.openTaskModal=openTaskModal;
 window.saveTask=saveTask;
 window.deleteTask=deleteTask;
+window.duplicateTask=duplicateTask;
 window.toggleDone=toggleDone;
 window.closeModal=closeModal;
 window.exportCsv=exportCsv;
@@ -1345,6 +1425,13 @@ window.exportHtmlSnapshot=exportHtmlSnapshot;
 window.showTip=showTip;
 window.hideTip=hideTip;
 window.showToast=showToast;
+window.toggleMobileNav=function(){
+  const nav=document.querySelector('.nav');
+  if(!nav)return;
+  const isOpen=nav.classList.toggle('mobile-open');
+  const btn=nav.querySelector('.nav-mobile-toggle');
+  if(btn)btn.textContent=isOpen?'✕':'☰';
+};
 
 window.addEventListener('pageshow',()=>{if(user)resumePlannerView()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&user)resumePlannerView()});
