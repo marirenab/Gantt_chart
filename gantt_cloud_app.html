@@ -890,10 +890,25 @@ async function saveShare(){
   const role=document.getElementById('share-role').value;
   if(!email)return;
   if(email===currentUserEmail()){flashMessage='Your own account already has access as the owner.';render();return}
+  const isNew=!shareRows.some(row=>row.email===email);
   const {error}=await supabase.from('chart_access').upsert({chart_id:selectedChart.id,email,role,created_by:user.id},{onConflict:'chart_id,email'});
   if(error){flashMessage=error.message;render();return}
+  if(isNew){
+    try{
+      await supabase.functions.invoke('notify-collaborator',{body:{
+        email,
+        chartTitle:selectedChart.title,
+        ownerEmail:currentUserEmail(),
+        role,
+        appUrl:window.location.origin+window.location.pathname
+      }});
+    }catch(e){
+      console.warn('Invite email failed (non-fatal):',e);
+    }
+  }
   await loadSelectedChart();
   renderShareModal();
+  showToast(isNew?`Invite sent to ${email} ✓`:`Access updated for ${email} ✓`);
   render();
 }
 
