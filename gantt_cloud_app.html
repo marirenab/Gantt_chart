@@ -170,6 +170,10 @@ button,input,select,textarea{font:inherit}
 .mascot-opt:hover{border-color:var(--accent2)}
 .mascot-opt.active{border-color:var(--accent2);background:#dbeafe}
 .mascot-opt .mascot-emoji{font-size:28px;line-height:1}
+.subtask-row{display:flex;align-items:center;gap:5px;margin-top:5px}
+.subtask-row input[type=text]{flex:1;min-width:0}
+.subtask-row input[type=date]{width:130px;flex-shrink:0}
+.subtask-row input[type=checkbox]{width:auto;flex-shrink:0;cursor:pointer;margin:0}
 </style>
 </head>
 <body>
@@ -232,7 +236,10 @@ let supabaseConfig=loadSupabaseConfig();
 let supabase=null,session=null,user=null;
 let charts=[],selectedChartId=null,selectedChart=null,selectedRole='owner';
 let projects=cloneDefaultProjects(),tasks=[],filterProjects=new Set(Object.keys(projects));
-let editTask=null,showDeliveryOnly=false,shareRows=[],flashMessage='',loading=true,chartLoading=false,importFile=null,exportPdfPromise=null,chartLoadToken=0,resumeLoadPending=false;
+let editTask=null,editSubtasks=[],showDeliveryOnly=false,shareRows=[],flashMessage='',loading=true,chartLoading=false,importFile=null,exportPdfPromise=null,chartLoadToken=0,resumeLoadPending=false;
+const ST_OPEN='\n\n<!-- gantt-subtasks: ',ST_CLOSE=' -->';
+function parseSubtasksFromDesc(raw){const idx=(raw||'').indexOf(ST_OPEN);if(idx===-1)return{text:raw||'',subtasks:[]};try{const end=raw.lastIndexOf(ST_CLOSE);return{text:raw.slice(0,idx),subtasks:JSON.parse(raw.slice(idx+ST_OPEN.length,end))};}catch{return{text:raw||'',subtasks:[]};}}
+function encodeSubtasksInDesc(text,subtasks){const base=(text||'').trimEnd();if(!subtasks||!subtasks.length)return base;return base+ST_OPEN+JSON.stringify(subtasks)+ST_CLOSE;}
 
 async function resumePlannerView(){
   if(resumeLoadPending||chartLoading||!supabase||!user)return;
@@ -297,16 +304,19 @@ function normalizeTask(task){
   const startDate=task.start_date||task.startDate||task.date;
   const endDate=task.end_date||task.endDate||startDate;
   const safeEnd=parseDate(endDate)<parseDate(startDate)?startDate:endDate;
+  const parsed=parseSubtasksFromDesc(task.description||'');
+  const subtasks=parsed.subtasks.length?parsed.subtasks:(task.subtasks||[]);
   return{
     id:task.id,
     task:task.task||'',
-    description:task.description||'',
+    description:parsed.text,
     outputs:task.outputs||'',
     project:task.project||Object.keys(projects)[0]||DEFAULT_PROJECTS[0].name,
     delivery:Boolean(task.delivery),
     done:Boolean(task.done),
     startDate,
-    endDate:safeEnd
+    endDate:safeEnd,
+    subtasks
   };
 }
 
@@ -499,7 +509,7 @@ function getMonths(startDate,endDate){
     const nextStart=new Date(Date.UTC(year,month+1,1));
     const visibleStart=monthStart.getTime()<startDate.getTime()?startDate:monthStart;
     const visibleEnd=nextStart.getTime()>endDate.getTime()?new Date(endDate.getTime()+DAY_MS):nextStart;
-    months.push({label:`${monthStart.toLocaleDateString('en-US',{month:'short',timeZone:'UTC'})} ${year}`,days:Math.ceil((visibleEnd-visibleStart)/DAY_MS)});
+    months.push({label:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month]+' '+year,days:Math.ceil((visibleEnd-visibleStart)/DAY_MS)});
     month+=1;
     if(month===12){month=0;year+=1}
   }
@@ -653,7 +663,7 @@ function renderWorkspace(){
 function renderChartItem(chart){
   const active=chart.id===selectedChartId;
   const owned=chart.owner_id===user.id;
-  return`<button class="chart-item ${active?'active':''}" onclick='selectChart(${jsq(chart.id)})'><div class="title">${esc(chart.title)}</div><div class="meta"><span>${owned?'Owned':'Shared'}</span><span>${new Date(chart.updated_at||chart.created_at).toLocaleDateString()}</span></div></button>`;
+  return`<button class="chart-item ${active?'active':''}" onclick='selectChart(${jsq(chart.id)})'><div class="title">${esc(chart.title)}</div><div class="meta"><span>${owned?'Owned':'Shared'}</span><span>${new Date(chart.updated_at||chart.created_at).toLocaleDateString('en-GB')}</span></div></button>`;
 }
 
 async function createChart(){
@@ -809,7 +819,9 @@ async function saveTask(){
   const done=document.getElementById('m-done').checked;
   if(!taskValue||!startDate||!endDateInput||!project)return;
   const safeEnd=parseDate(endDateInput)<parseDate(startDate)?startDate:endDateInput;
-  const payload={chart_id:selectedChart.id,task:taskValue,description,outputs,project,start_date:startDate,end_date:safeEnd,delivery,done};
+  const subtasks=collectSubtasks();
+  const encodedDescription=encodeSubtasksInDesc(description,subtasks);
+  const payload={chart_id:selectedChart.id,task:taskValue,description:encodedDescription,outputs,project,start_date:startDate,end_date:safeEnd,delivery,done};
   const btn=document.querySelector('#modal-overlay .btn-primary');
   if(btn){btn.disabled=true;btn.textContent='Saving…';}
   try{
@@ -818,15 +830,20 @@ async function saveTask(){
       : supabase.from('tasks').update(payload).eq('id',editTask.id);
     const {error}=await request;
     if(error)throw new Error(error.message);
+    if(editTask.id!=='new'){
+      const idx=tasks.findIndex(t=>t.id===editTask.id);
+      if(idx!==-1)tasks.splice(idx,1,normalizeTask({...editTask,...payload,start_date:startDate,end_date:safeEnd}));
+    }
     closeModal();
-    await loadSelectedChart();
     showToast('Block saved ✓');
+    render();
+    loadSelectedChart();
   }catch(err){
     showToast(`Save failed: ${err.message}`,'err');
     flashMessage=`Save failed: ${err.message}`;
     if(btn){btn.disabled=false;btn.textContent='Save';}
+    render();
   }
-  render();
 }
 
 async function deleteTask(){
@@ -1099,7 +1116,7 @@ function exportHtmlSnapshot(){
   const standaloneTasks=tasks.map(task=>({
     id:task.id,
     task:task.task,
-    description:task.description,
+    description:encodeSubtasksInDesc(task.description,task.subtasks||[]),
     outputs:task.outputs,
     project:task.project,
     delivery:task.delivery,
@@ -1131,7 +1148,15 @@ let tasks=(Array.isArray(state.tasks)?state.tasks:DATA.tasks||[]).map(normalizeT
 let filterProjects=new Set(Object.keys(projects));
 let showDeliveryOnly=false,editTask=null,exportPdfPromise=null;
 const app=document.getElementById('app');
-function normalizeTask(task){const startDate=task.startDate||task.start_date||task.date;const endDate=task.endDate||task.end_date||startDate;const safeEnd=parseDate(endDate)<parseDate(startDate)?startDate:endDate;return{id:task.id||crypto.randomUUID(),task:task.task||'',description:task.description||'',outputs:task.outputs||'',project:task.project||Object.keys(projects)[0]||'Project 1',delivery:Boolean(task.delivery),done:Boolean(task.done),startDate,endDate:safeEnd}};
+const ST_OPEN='\n\n<!-- gantt-subtasks: ',ST_CLOSE=' -->';
+function parseSubtasksFromDesc(raw){const idx=(raw||'').indexOf(ST_OPEN);if(idx===-1)return{text:raw||'',subtasks:[]};try{const end=raw.lastIndexOf(ST_CLOSE);return{text:raw.slice(0,idx),subtasks:JSON.parse(raw.slice(idx+ST_OPEN.length,end))};}catch{return{text:raw||'',subtasks:[]};}}
+function encodeSubtasksInDesc(text,subtasks){const base=(text||'').trimEnd();if(!subtasks||!subtasks.length)return base;return base+ST_OPEN+JSON.stringify(subtasks)+ST_CLOSE;}
+let editSubtasks=[];
+function renderSubtaskList(){const list=document.getElementById('subtask-list');if(!list)return;list.innerHTML=editSubtasks.map((st,i)=>\`<div class="subtask-row"><input type="checkbox" id="st-done-\${i}" \${st.done?'checked':''}><input type="text" id="st-task-\${i}" value="${'${'}esc(st.task)}" placeholder="Subtask name"><input type="date" id="st-start-\${i}" value="\${st.startDate||''}"><input type="date" id="st-end-\${i}" value="\${st.endDate||''}"><button class="btn btn-ghost" style="padding:3px 7px;font-size:13px;flex-shrink:0" onclick="removeSubtask(\${i})" title="Remove">✕</button></div>\`).join('');}
+function addSubtask(){const today=fmtDate(new Date());editSubtasks.push({id:crypto.randomUUID(),task:'',startDate:today,endDate:today,done:false});renderSubtaskList();const last=document.getElementById(\`st-task-\${editSubtasks.length-1}\`);if(last)last.focus();}
+function removeSubtask(idx){editSubtasks.splice(idx,1);renderSubtaskList();}
+function collectSubtasks(){return editSubtasks.map((st,i)=>({id:st.id,task:(document.getElementById(\`st-task-\${i}\`)?.value||'').trim(),startDate:document.getElementById(\`st-start-\${i}\`)?.value||st.startDate,endDate:document.getElementById(\`st-end-\${i}\`)?.value||st.endDate,done:Boolean(document.getElementById(\`st-done-\${i}\`)?.checked)})).filter(st=>st.task);}
+function normalizeTask(task){const startDate=task.startDate||task.start_date||task.date;const endDate=task.endDate||task.end_date||startDate;const safeEnd=parseDate(endDate)<parseDate(startDate)?startDate:endDate;const parsed=parseSubtasksFromDesc(task.description||'');const subtasks=parsed.subtasks.length?parsed.subtasks:(task.subtasks||[]);return{id:task.id||crypto.randomUUID(),task:task.task||'',description:parsed.text,outputs:task.outputs||'',project:task.project||Object.keys(projects)[0]||'Project 1',delivery:Boolean(task.delivery),done:Boolean(task.done),startDate,endDate:safeEnd,subtasks}};
 function saveState(){safeWrite(STORAGE_KEY,{title,projects,tasks});}
 function sortTasks(){tasks.sort((a,b)=>getTaskStart(a).localeCompare(getTaskStart(b))||getTaskEnd(a).localeCompare(getTaskEnd(b))||a.task.localeCompare(b.task));}
 function syncFilters(){filterProjects=new Set([...filterProjects].filter(name=>projects[name]));}
@@ -1142,14 +1167,14 @@ function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task
 function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start:\`${'${'}start} to ${'${'}end}\`}
 function filteredTasks(){let filtered=tasks.filter(task=>filterProjects.has(task.project));if(showDeliveryOnly)filtered=filtered.filter(task=>task.delivery);return filtered}
 function dateWindow(){if(!tasks.length){const year=new Date().getUTCFullYear();const startDate=parseDate(\`${'${'}year}-01-01\`),endDate=parseDate(\`${'${'}year+1}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}const starts=tasks.map(task=>getTaskStart(task)).sort();const ends=tasks.map(task=>getTaskEnd(task)).sort();const startYear=parseDate(starts[0]).getUTCFullYear();const endYear=parseDate(ends[ends.length-1]).getUTCFullYear();const startDate=parseDate(\`${'${'}startYear}-01-01\`),endDate=parseDate(\`${'${'}endYear}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}
-function getMonths(startDate,endDate){const months=[];let year=startDate.getUTCFullYear(),month=startDate.getUTCMonth();while(Date.UTC(year,month,1)<=endDate.getTime()){const monthStart=new Date(Date.UTC(year,month,1)),nextStart=new Date(Date.UTC(year,month+1,1)),visibleStart=monthStart.getTime()<startDate.getTime()?startDate:monthStart,visibleEnd=nextStart.getTime()>endDate.getTime()?new Date(endDate.getTime()+DAY_MS):nextStart;months.push({label:monthStart.toLocaleDateString('en-US',{month:'short',timeZone:'UTC'})+' '+year,days:Math.ceil((visibleEnd-visibleStart)/DAY_MS)});month+=1;if(month===12){month=0;year+=1}}return months}
+function getMonths(startDate,endDate){const months=[];let year=startDate.getUTCFullYear(),month=startDate.getUTCMonth();while(Date.UTC(year,month,1)<=endDate.getTime()){const monthStart=new Date(Date.UTC(year,month,1)),nextStart=new Date(Date.UTC(year,month+1,1)),visibleStart=monthStart.getTime()<startDate.getTime()?startDate:monthStart,visibleEnd=nextStart.getTime()>endDate.getTime()?new Date(endDate.getTime()+DAY_MS):nextStart;months.push({label:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month]+' '+year,days:Math.ceil((visibleEnd-visibleStart)/DAY_MS)});month+=1;if(month===12){month=0;year+=1}}return months}
 function dayOffset(ds,startDate){return Math.floor((parseDate(ds)-startDate)/DAY_MS)}
 async function loadPdfTools(){if(!exportPdfPromise){exportPdfPromise=import('https://esm.sh/jspdf@2.5.1').then(m=>({jsPDF:m.jsPDF||(m.default&&m.default.jsPDF)||m.default}))}return exportPdfPromise}
 function render(){sortTasks();saveState();syncFilters();const filtered=filteredTasks();const {startDate,endDate,totalDays}=dateWindow();const months=getMonths(startDate,endDate);const chartWidth=totalDays*DAY_W;const today=parseDate(fmtDate(new Date()));const todayOff=Math.floor((today-startDate)/DAY_MS);app.innerHTML=\`<div id="pdfExportRoot"><div class="toolbar"><h2>${'${'}esc(title)}</h2><span class="toolbar-gap"></span><button class="btn ${'${'}showDeliveryOnly?'btn-danger':''}" onclick="toggleDeliveryOnly()">Deliveries only</button><button class="btn" onclick="openTaskModal(-1)">+ Add block</button><button class="btn" onclick="openProjectsModal()">Manage projects</button><button class="btn" onclick="openExportModal()">Export</button></div><div class="toolbar-sub" style="padding:0 18px 10px;background:var(--surface);border-bottom:1px solid var(--border)">Standalone local editor. Changes save in this browser only.</div><div class="filters"><button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;border-radius:999px" onclick="toggleSelectAllProjects()">${'${'}filterProjects.size===Object.keys(projects).length?'Deselect all':'Select all'}</button>${'${'}Object.entries(projects).map(([name,project])=>\`<button class="filter-chip ${'${'}filterProjects.has(name)?'on':''}" style="${'${'}filterProjects.has(name)?\`background:${'${'}project.color}33;color:${'${'}project.color};border-color:${'${'}project.color}55\`:''}" onclick='toggleProjectFilter(${ '${'}jsq(name)})'>${'${'}esc(name)}</button>\`).join('')}</div><div class="main"><div class="sidebar">${'${'}filtered.map(task=>\`<div class="sidebar-row ${'${'}task.delivery?'delivery':''} ${'${'}task.done?'done':''}" onclick='openTaskModal(${ '${'}jsq(task.id)})'><button class="row-check ${'${'}task.done?'done':''}" onclick='toggleDone(event,${ '${'}jsq(task.id)})'>✓</button><div class="dot" style="background:${'${'}(projects[task.project]||{}).color||'#666'}"></div><div class="label">${'${'}task.delivery?'🚩 ':''}${'${'}esc(task.task)}</div><div class="date">${'${'}taskRangeLabel(task)}</div></div>\`).join('')}${'${'}!filtered.length?'<div style="padding:18px;font-size:12px;color:var(--text2)">No blocks match the current filters.</div>':''}</div><div class="chart-area" id="chartArea"><div class="chart-header">${'${'}months.map(month=>\`<div class="month-col" style="width:${'${'}month.days*DAY_W}px">${'${'}month.label}</div>\`).join('')}</div><div class="chart-body" style="width:${'${'}chartWidth}px;height:${'${'}Math.max(1,filtered.length)*ROW_H}px">${'${'}todayOff>=0&&todayOff<totalDays?\`<div class="today-line" style="left:${'${'}todayOff*DAY_W}px"></div><div class="today-label" style="left:${'${'}todayOff*DAY_W}px">TODAY</div>\`:''}${'${'}filtered.map(task=>{const offset=dayOffset(getTaskStart(task),startDate),width=taskDuration(task)*DAY_W,project=projects[task.project]||{color:'#666',bg:'#444'};return\`<div class="chart-row"><div class="bar ${'${'}task.delivery?'delivery-bar':''} ${'${'}task.done?'done-bar':''}" style="left:${'${'}offset*DAY_W}px;width:${'${'}width}px;background:linear-gradient(135deg,${'${'}project.color},${'${'}project.bg})" onmouseenter='showTip(event,${ '${'}jsq(task.id)})' onmouseleave="hideTip()" onclick='openTaskModal(${ '${'}jsq(task.id)})'></div></div>\`}).join('')}</div></div></div><div class="legend">${'${'}Object.entries(projects).filter(([name])=>filterProjects.has(name)).map(([name,project])=>\`<div class="legend-item"><div class="legend-dot" style="background:${'${'}project.color}"></div>${'${'}esc(name)}</div>\`).join('')}<div class="legend-item"><div class="legend-dot" style="background:#ff3333"></div>🚩 Delivery</div></div></div>\`;const chartArea=document.getElementById('chartArea');if(chartArea&&todayOff>0)chartArea.scrollLeft=Math.max(0,todayOff*DAY_W-220)}
 function modalShell(){let overlay=document.getElementById('modal-overlay');if(!overlay){overlay=document.createElement('div');overlay.id='modal-overlay';document.body.appendChild(overlay)}overlay.className='modal-overlay';overlay.onclick=e=>{if(e.target===overlay)closeModal()};return overlay}
-function closeModal(){const overlay=document.getElementById('modal-overlay');if(overlay)overlay.remove();editTask=null}
-function openTaskModal(id){if(id===-1){const todayValue=fmtDate(parseDate(fmtDate(new Date())));editTask={id:crypto.randomUUID(),task:'',description:'',outputs:'',project:Object.keys(projects)[0]||'Project 1',startDate:todayValue,endDate:todayValue,delivery:false,done:false}}else{editTask=tasks.find(task=>task.id===id)}if(!editTask)return;const overlay=modalShell();overlay.innerHTML=\`<div class="modal"><h3>${'${'}tasks.some(task=>task.id===editTask.id)?'Edit block':'Add block'}</h3><label>Task</label><input id="m-task" value="${'${'}esc(editTask.task)}"><label>Description / details</label><textarea id="m-desc">${'${'}esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out">${'${'}esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${'${'}getTaskStart(editTask)}"><label>End date</label><input id="m-end" type="date" value="${'${'}getTaskEnd(editTask)}"><label>Project</label><select id="m-proj">${'${'}Object.keys(projects).map(name=>\`<option value="${'${'}esc(name)}" ${'${'}name===editTask.project?'selected':''}>${'${'}esc(name)}</option>\`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${'${'}editTask.delivery?'checked':''}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${'${'}editTask.done?'checked':''}> ✓ Mark as done</label><div class="modal-buttons">${'${'}tasks.some(task=>task.id===editTask.id)?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button>':''}<button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="saveTask()">Save</button></div></div>\`}
-function saveTask(){const taskValue=document.getElementById('m-task').value.trim(),description=document.getElementById('m-desc').value.trim(),outputs=document.getElementById('m-out').value.trim(),startDate=document.getElementById('m-start').value,endDateInput=document.getElementById('m-end').value,project=document.getElementById('m-proj').value,delivery=document.getElementById('m-deliver').checked,done=document.getElementById('m-done').checked;if(!taskValue||!startDate||!endDateInput||!project)return;const safeEnd=parseDate(endDateInput)<parseDate(startDate)?startDate:endDateInput;const existingIndex=tasks.findIndex(task=>task.id===editTask.id);const nextTask=normalizeTask({...editTask,task:taskValue,description,outputs,project,delivery,done,startDate,endDate:safeEnd});if(existingIndex===-1)tasks.push(nextTask);else tasks.splice(existingIndex,1,nextTask);closeModal();render()}
+function closeModal(){const overlay=document.getElementById('modal-overlay');if(overlay)overlay.remove();editTask=null;editSubtasks=[];}
+function openTaskModal(id){if(id===-1){const todayValue=fmtDate(parseDate(fmtDate(new Date())));editTask={id:crypto.randomUUID(),task:'',description:'',outputs:'',project:Object.keys(projects)[0]||'Project 1',startDate:todayValue,endDate:todayValue,delivery:false,done:false,subtasks:[]}}else{editTask=tasks.find(task=>task.id===id)}if(!editTask)return;editSubtasks=(editTask.subtasks||[]).map(st=>({...st}));const overlay=modalShell();overlay.innerHTML=\`<div class="modal"><h3>${'${'}tasks.some(task=>task.id===editTask.id)?'Edit block':'Add block'}</h3><label>Task</label><input id="m-task" value="${'${'}esc(editTask.task)}"><label>Description / details</label><textarea id="m-desc">${'${'}esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out">${'${'}esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${'${'}getTaskStart(editTask)}"><label>End date</label><input id="m-end" type="date" value="${'${'}getTaskEnd(editTask)}"><label>Project</label><select id="m-proj">${'${'}Object.keys(projects).map(name=>\`<option value="${'${'}esc(name)}" ${'${'}name===editTask.project?'selected':''}>${'${'}esc(name)}</option>\`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${'${'}editTask.delivery?'checked':''}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${'${'}editTask.done?'checked':''}> ✓ Mark as done</label><div style="margin-top:14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px"><span style="font-size:12px;font-weight:600;color:var(--text2)">Subtasks</span><button class="btn btn-ghost" style="font-size:11px;padding:2px 8px" onclick="addSubtask()">+ Add</button></div><div id="subtask-list"></div></div><div class="modal-buttons">${'${'}tasks.some(task=>task.id===editTask.id)?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button>':''}<button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="saveTask()">Save</button></div></div>\`;renderSubtaskList();}
+function saveTask(){const taskValue=document.getElementById('m-task').value.trim(),description=document.getElementById('m-desc').value.trim(),outputs=document.getElementById('m-out').value.trim(),startDate=document.getElementById('m-start').value,endDateInput=document.getElementById('m-end').value,project=document.getElementById('m-proj').value,delivery=document.getElementById('m-deliver').checked,done=document.getElementById('m-done').checked;if(!taskValue||!startDate||!endDateInput||!project)return;const safeEnd=parseDate(endDateInput)<parseDate(startDate)?startDate:endDateInput;const subtasks=collectSubtasks();const encodedDescription=encodeSubtasksInDesc(description,subtasks);const existingIndex=tasks.findIndex(task=>task.id===editTask.id);const nextTask=normalizeTask({...editTask,task:taskValue,description:encodedDescription,outputs,project,delivery,done,startDate,endDate:safeEnd});if(existingIndex===-1)tasks.push(nextTask);else tasks.splice(existingIndex,1,nextTask);closeModal();render()}
 function deleteTask(){tasks=tasks.filter(task=>task.id!==editTask.id);closeModal();render()}
 function toggleDone(event,id){event.stopPropagation();const task=tasks.find(item=>item.id===id);if(!task)return;task.done=!task.done;render()}
 function openProjectsModal(){const overlay=modalShell();overlay.innerHTML=\`<div class="modal"><h3>Manage projects</h3><p>Projects define the color groups in this chart.</p><div class="project-list">${'${'}Object.keys(projects).map(name=>{const count=tasks.filter(task=>task.project===name).length,project=projects[name],renameId=\`rename-${'${'}encodeURIComponent(name)}\`,colorId=\`color-${'${'}encodeURIComponent(name)}\`;return\`<div class="project-row"><div class="project-meta"><div class="legend-dot" style="background:${'${'}project.color}"></div><div class="project-text"><div class="project-name">${'${'}esc(name)}</div><div class="project-count">${'${'}count} block${'${'}count===1?'':'s'}</div><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><input id="${'${'}renameId}" value="${'${'}esc(name)}" style="min-width:180px"><button class="btn" onclick='renameProject(${ '${'}jsq(name)})'>Rename</button></div><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><input id="${'${'}colorId}" type="color" value="${'${'}project.color}" style="width:56px;padding:4px 6px"><button class="btn" onclick='updateProjectColor(${ '${'}jsq(name)})'>Save color</button></div></div></div><button class="btn btn-danger" onclick='removeProject(${ '${'}jsq(name)})'>Remove</button></div>\`}).join('')}</div><label>New project name</label><input id="project-name" placeholder="e.g. Paper 5"><label>Project color</label><input id="project-color" type="color" value="#3b82f6" style="width:72px;padding:4px 6px"><div class="modal-buttons"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="addProject()">Add project</button></div></div>\`}
@@ -1167,7 +1192,7 @@ function exportCsv(doneOnly){const rows=(doneOnly?tasks.filter(task=>task.done):
 function buildGanttCanvas(){const S=2;const filtered=filteredTasks();if(!filtered.length)throw new Error('No tasks to export.');const {startDate,endDate,totalDays}=dateWindow();const months=getMonths(startDate,endDate);const SB=340,DW=DAY_W,RH=ROW_H,TH=44,MH=28,LH=36;const CW=totalDays*DW,W=SB+CW,H=TH+MH+filtered.length*RH+LH;const cv=document.createElement('canvas');cv.width=W*S;cv.height=H*S;const ctx=cv.getContext('2d');ctx.scale(S,S);const bg='#e9ecef',surf='#f4f5f7',bdr='#cfd5dd',tx='#2f3743',tx2='#6b7280',acc='#2563eb';const rr=(x,y,w,h,r)=>{ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);ctx.lineTo(x+r,y+h);ctx.arcTo(x,y+h,x,y+h-r,r);ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);ctx.closePath();};const hl=(y,c=bdr,lw=1)=>{ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.strokeStyle=c;ctx.lineWidth=lw;ctx.stroke();};const vl=(x,y1,y2,c=bdr,lw=1)=>{ctx.beginPath();ctx.moveTo(x,y1);ctx.lineTo(x,y2);ctx.strokeStyle=c;ctx.lineWidth=lw;ctx.stroke();};const trunc=(t,mw)=>{if(ctx.measureText(t).width<=mw)return t;while(t.length>1&&ctx.measureText(t+'…').width>mw)t=t.slice(0,-1);return t+'…';};ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);ctx.fillStyle=surf;ctx.fillRect(0,0,W,TH);hl(TH);ctx.font='600 15px "DM Sans",sans-serif';ctx.fillStyle=tx;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(title||'Gantt Chart',18,TH/2);ctx.font='400 10px "DM Sans",sans-serif';ctx.fillStyle=tx2;ctx.textAlign='right';ctx.fillText('Exported '+fmtDate(new Date()),W-18,TH/2);ctx.fillStyle=surf;ctx.fillRect(0,TH,SB,MH);ctx.fillRect(SB,TH,CW,MH);ctx.font='600 10px "DM Sans",sans-serif';ctx.fillStyle=tx2;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('Task',28,TH+MH/2);ctx.textAlign='right';ctx.fillText('Dates',SB-8,TH+MH/2);let mx=SB;for(const m of months){const mw=m.days*DW;vl(mx,TH,TH+MH);ctx.font='600 10px "DM Sans",sans-serif';ctx.fillStyle=tx2;ctx.textAlign='center';ctx.textBaseline='middle';if(mw>20)ctx.fillText(m.label,mx+mw/2,TH+MH/2);mx+=mw;}hl(TH+MH);vl(SB,TH,H-LH);const today=parseDate(fmtDate(new Date()));const todayOff=Math.floor((today-startDate)/DAY_MS);if(todayOff>=0&&todayOff<totalDays){const ttx=SB+todayOff*DW;vl(ttx,TH+MH,TH+MH+filtered.length*RH,acc+'80',2);ctx.font='bold 8px "DM Sans",sans-serif';ctx.fillStyle=acc;ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText('TODAY',ttx,TH+MH+2);}ctx.textBaseline='middle';for(let i=0;i<filtered.length;i++){const task=filtered[i];const ry=TH+MH+i*RH;const proj=projects[task.project]||{color:'#666',bg:'#444'};if(task.delivery){ctx.fillStyle='rgba(255,51,51,0.07)';ctx.fillRect(0,ry,SB,RH);}hl(ry+RH,'rgba(46,51,69,0.12)',0.5);ctx.fillStyle=task.done?proj.color+'80':proj.color;ctx.beginPath();ctx.arc(16,ry+RH/2,4,0,Math.PI*2);ctx.fill();ctx.font=(task.delivery?'600':'400')+' 11px "DM Sans",sans-serif';ctx.fillStyle=task.done?tx2:tx;ctx.textAlign='left';const lbl=(task.delivery?'🚩 ':'')+task.task;const tlbl=trunc(lbl,SB-100);ctx.fillText(tlbl,28,ry+RH/2);if(task.done){ctx.strokeStyle=tx2;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(28,ry+RH/2);ctx.lineTo(28+ctx.measureText(tlbl).width,ry+RH/2);ctx.stroke();}ctx.font='10px "JetBrains Mono",monospace';ctx.fillStyle=tx2;ctx.textAlign='right';ctx.fillText(taskRangeLabel(task),SB-8,ry+RH/2);const off=dayOffset(getTaskStart(task),startDate);const dur=Math.max(1,taskDuration(task));const bx=SB+off*DW,bw=Math.max(4,dur*DW),by=ry+(RH-16)/2;rr(bx,by,bw,16,4);if(task.done){ctx.fillStyle=proj.color+'55';ctx.fill();}else{const g=ctx.createLinearGradient(bx,0,bx+bw,0);g.addColorStop(0,proj.color);g.addColorStop(1,proj.bg);ctx.fillStyle=g;ctx.fill();}if(task.delivery&&!task.done){rr(bx,by,bw,16,4);ctx.strokeStyle='#ef4444';ctx.lineWidth=2;ctx.stroke();}}const ly=TH+MH+filtered.length*RH;ctx.fillStyle=surf;ctx.fillRect(0,ly,W,LH);hl(ly);let lx=18;ctx.textBaseline='middle';for(const [nm,proj] of Object.entries(projects)){if(!filterProjects.has(nm))continue;rr(lx,ly+LH/2-5,10,10,2);ctx.fillStyle=proj.color;ctx.fill();ctx.font='10px "DM Sans",sans-serif';ctx.fillStyle=tx2;ctx.textAlign='left';ctx.fillText(nm,lx+14,ly+LH/2);lx+=ctx.measureText(nm).width+28;}rr(lx,ly+LH/2-5,10,10,2);ctx.fillStyle='#ff3333';ctx.fill();ctx.fillText('🚩 Delivery',lx+14,ly+LH/2);return cv}
 async function exportPng(){closeModal();try{const canvas=buildGanttCanvas();const link=document.createElement('a');link.href=canvas.toDataURL('image/png');link.download=\`${'${'}slug(title)}.png\`;link.click()}catch(e){alert('Export failed: '+e.message)}}
 async function exportPdf(){closeModal();try{const canvas=buildGanttCanvas();const {jsPDF}=await loadPdfTools();const orientation=canvas.width>canvas.height?'landscape':'portrait';const pdf=new jsPDF({orientation,unit:'pt',format:'a4'});const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=20,printableWidth=pageWidth-(margin*2),printableHeight=pageHeight-(margin*2),scale=printableWidth/canvas.width,pageSliceHeight=Math.max(1,Math.floor(printableHeight/scale));let offsetY=0,pageIndex=0;while(offsetY<canvas.height){const sliceHeight=Math.min(pageSliceHeight,canvas.height-offsetY),sliceCanvas=document.createElement('canvas');sliceCanvas.width=canvas.width;sliceCanvas.height=sliceHeight;sliceCanvas.getContext('2d').drawImage(canvas,0,offsetY,canvas.width,sliceHeight,0,0,canvas.width,sliceHeight);if(pageIndex>0)pdf.addPage();pdf.addImage(sliceCanvas.toDataURL('image/png'),'PNG',margin,margin,printableWidth,sliceHeight*scale);offsetY+=sliceHeight;pageIndex+=1}pdf.save(\`${'${'}slug(title)}.pdf\`)}catch(e){alert('Export failed: '+e.message)}}
-window.openTaskModal=openTaskModal;window.saveTask=saveTask;window.deleteTask=deleteTask;window.toggleDone=toggleDone;window.openProjectsModal=openProjectsModal;window.addProject=addProject;window.renameProject=renameProject;window.updateProjectColor=updateProjectColor;window.removeProject=removeProject;window.toggleDeliveryOnly=toggleDeliveryOnly;window.toggleProjectFilter=toggleProjectFilter;window.toggleSelectAllProjects=toggleSelectAllProjects;window.showTip=showTip;window.hideTip=hideTip;window.openExportModal=openExportModal;window.exportCsv=exportCsv;window.exportPng=exportPng;window.exportPdf=exportPdf;window.closeModal=closeModal;render();})();`;
+window.openTaskModal=openTaskModal;window.saveTask=saveTask;window.deleteTask=deleteTask;window.toggleDone=toggleDone;window.addSubtask=addSubtask;window.removeSubtask=removeSubtask;window.openProjectsModal=openProjectsModal;window.addProject=addProject;window.renameProject=renameProject;window.updateProjectColor=updateProjectColor;window.removeProject=removeProject;window.toggleDeliveryOnly=toggleDeliveryOnly;window.toggleProjectFilter=toggleProjectFilter;window.toggleSelectAllProjects=toggleSelectAllProjects;window.showTip=showTip;window.hideTip=hideTip;window.openExportModal=openExportModal;window.exportCsv=exportCsv;window.exportPng=exportPng;window.exportPdf=exportPdf;window.closeModal=closeModal;render();})();`;
   const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${esc(selectedChart.title)}</title>${styles}</head><body><div id="app"></div>${dataScript}<script>${appCode.replace(/<\/script>/g,'<\\/script>')}<\/script></body></html>`;
   const filename=`${chartTitleForFile()}.html`;
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});
@@ -1189,21 +1214,48 @@ function openTaskModal(id){
   if(!selectedChart)return;
   if(id===-1){
     const todayValue=fmtDate(parseDate(fmtDate(new Date())));
-    editTask={id:'new',task:'',description:'',outputs:'',project:Object.keys(projects)[0]||DEFAULT_PROJECTS[0].name,startDate:todayValue,endDate:todayValue,delivery:false,done:false};
+    editTask={id:'new',task:'',description:'',outputs:'',project:Object.keys(projects)[0]||DEFAULT_PROJECTS[0].name,startDate:todayValue,endDate:todayValue,delivery:false,done:false,subtasks:[]};
   }else{
     editTask=tasks.find(task=>task.id===id);
   }
   if(!editTask)return;
-  const disabled=selectedCanEdit()?'':'disabled';
+  editSubtasks=(editTask.subtasks||[]).map(st=>({...st}));
+  const canEdit=selectedCanEdit();
+  const disabled=canEdit?'':'disabled';
   const overlay=modalShell();
-  overlay.innerHTML=`<div class="modal"><h3>${editTask.id==='new'?'Add block':'Edit block'}</h3><label>Task</label><input id="m-task" value="${esc(editTask.task)}" ${disabled}><label>Description / details</label><textarea id="m-desc" placeholder="Add notes, links, context..." ${disabled}>${esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out" placeholder="Figures: /path/here&#10;Ppt: /path/here" ${disabled}>${esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${getTaskStart(editTask)}" ${disabled}><label>End date</label><input id="m-end" type="date" value="${getTaskEnd(editTask)}" ${disabled}><label>Project</label><select id="m-proj" ${disabled}>${Object.keys(projects).map(name=>`<option value="${esc(name)}" ${name===editTask.project?'selected':''}>${esc(name)}</option>`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${editTask.delivery?'checked':''} ${disabled}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${editTask.done?'checked':''} ${disabled}> ✓ Mark as done</label><div class="modal-buttons">${selectedCanEdit()&&editTask.id!=='new'?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button><button class="btn" onclick="duplicateTask()">Duplicate</button>':''}<button class="btn" onclick="closeModal()">Close</button>${selectedCanEdit()?'<button class="btn btn-primary" onclick="saveTask()">Save</button>':''}</div></div>`;
+  overlay.innerHTML=`<div class="modal"><h3>${editTask.id==='new'?'Add block':'Edit block'}</h3><label>Task</label><input id="m-task" value="${esc(editTask.task)}" ${disabled}><label>Description / details</label><textarea id="m-desc" placeholder="Add notes, links, context..." ${disabled}>${esc(editTask.description||'')}</textarea><label>Outputs / paths</label><textarea id="m-out" placeholder="Figures: /path/here&#10;Ppt: /path/here" ${disabled}>${esc(editTask.outputs||'')}</textarea><label>Start date</label><input id="m-start" type="date" value="${getTaskStart(editTask)}" ${disabled}><label>End date</label><input id="m-end" type="date" value="${getTaskEnd(editTask)}" ${disabled}><label>Project</label><select id="m-proj" ${disabled}>${Object.keys(projects).map(name=>`<option value="${esc(name)}" ${name===editTask.project?'selected':''}>${esc(name)}</option>`).join('')}</select><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-deliver" ${editTask.delivery?'checked':''} ${disabled}> 🚩 Delivery milestone</label><label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)"><input type="checkbox" id="m-done" ${editTask.done?'checked':''} ${disabled}> ✓ Mark as done</label><div style="margin-top:14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px"><span style="font-size:12px;font-weight:600;color:var(--text2)">Subtasks</span>${canEdit?'<button class="btn btn-ghost" style="font-size:11px;padding:2px 8px" onclick="addSubtask()">+ Add</button>':''}</div><div id="subtask-list"></div></div><div class="modal-buttons">${canEdit&&editTask.id!=='new'?'<button class="btn btn-danger" onclick="deleteTask()">Delete</button><button class="btn" onclick="duplicateTask()">Duplicate</button>':''}<button class="btn" onclick="closeModal()">Close</button>${canEdit?'<button class="btn btn-primary" onclick="saveTask()">Save</button>':''}</div></div>`;
+  renderSubtaskList(!canEdit);
 }
 
 function closeModal(){
   const overlay=document.getElementById('modal-overlay');
   if(overlay)overlay.remove();
   editTask=null;
+  editSubtasks=[];
   importFile=null;
+}
+
+function renderSubtaskList(disabled){
+  const list=document.getElementById('subtask-list');
+  if(!list)return;
+  list.innerHTML=editSubtasks.map((st,i)=>`<div class="subtask-row"><input type="checkbox" id="st-done-${i}" ${st.done?'checked':''} ${disabled?'disabled':''}><input type="text" id="st-task-${i}" value="${esc(st.task)}" placeholder="Subtask name" ${disabled?'disabled':''}><input type="date" id="st-start-${i}" value="${st.startDate||''}" ${disabled?'disabled':''}><input type="date" id="st-end-${i}" value="${st.endDate||''}" ${disabled?'disabled':''}>${disabled?'':`<button class="btn btn-ghost" style="padding:3px 7px;font-size:13px;flex-shrink:0" onclick="removeSubtask(${i})" title="Remove">✕</button>`}</div>`).join('');
+}
+function addSubtask(){
+  const today=fmtDate(new Date());
+  editSubtasks.push({id:crypto.randomUUID(),task:'',startDate:today,endDate:today,done:false});
+  renderSubtaskList(false);
+  const last=document.getElementById(`st-task-${editSubtasks.length-1}`);
+  if(last)last.focus();
+}
+function removeSubtask(idx){editSubtasks.splice(idx,1);renderSubtaskList(false);}
+function collectSubtasks(){
+  return editSubtasks.map((st,i)=>({
+    id:st.id,
+    task:(document.getElementById(`st-task-${i}`)?.value||'').trim(),
+    startDate:document.getElementById(`st-start-${i}`)?.value||st.startDate,
+    endDate:document.getElementById(`st-end-${i}`)?.value||st.endDate,
+    done:Boolean(document.getElementById(`st-done-${i}`)?.checked)
+  })).filter(st=>st.task);
 }
 
 let _toastTimer=null;
@@ -1418,6 +1470,8 @@ window.deleteTask=deleteTask;
 window.duplicateTask=duplicateTask;
 window.toggleDone=toggleDone;
 window.closeModal=closeModal;
+window.addSubtask=addSubtask;
+window.removeSubtask=removeSubtask;
 window.exportCsv=exportCsv;
 window.exportPdf=exportPdf;
 window.exportPng=exportPng;
