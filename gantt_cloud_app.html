@@ -523,13 +523,16 @@ function dayOffset(ds,startDate){
 function getTaskStart(task){return task.startDate}
 function getTaskEnd(task){return task.endDate}
 function taskDuration(task){return Math.max(1,Math.floor((parseDate(getTaskEnd(task))-parseDate(getTaskStart(task)))/DAY_MS)+1)}
-function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start.slice(2):`${start.slice(2)}→${end.slice(2)}`}
-function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start:`${start} to ${end}`}
+function euD(iso){const p=iso.split('-');return p[2]+'/'+p[1]+'/'+p[0].slice(2);}
+function euDate(iso){const p=iso.split('-');return p[2]+'/'+p[1]+'/'+p[0];}
+function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?euD(start):`${euD(start)}→${euD(end)}`}
+function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?euDate(start):`${euDate(start)} to ${euDate(end)}`}
 function chartTitleForFile(){return(selectedChart?.title||'gantt_chart').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'gantt_chart'}
 
 function filteredTasks(){
   let filtered=tasks.filter(task=>filterProjects.has(task.project));
   if(showDeliveryOnly)filtered=filtered.filter(task=>task.delivery);
+  filtered.sort((a,b)=>getTaskStart(a).localeCompare(getTaskStart(b))||getTaskEnd(a).localeCompare(getTaskEnd(b))||a.task.localeCompare(b.task));
   return filtered;
 }
 
@@ -663,7 +666,7 @@ function renderWorkspace(){
 function renderChartItem(chart){
   const active=chart.id===selectedChartId;
   const owned=chart.owner_id===user.id;
-  return`<button class="chart-item ${active?'active':''}" onclick='selectChart(${jsq(chart.id)})'><div class="title">${esc(chart.title)}</div><div class="meta"><span>${owned?'Owned':'Shared'}</span><span>${new Date(chart.updated_at||chart.created_at).toLocaleDateString('en-GB')}</span></div></button>`;
+  return`<button class="chart-item ${active?'active':''}" onclick='selectChart(${jsq(chart.id)})'><div class="title">${esc(chart.title)}</div><div class="meta"><span>${owned?'Owned':'Shared'}</span><span>${(d=>{return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()})(new Date(chart.updated_at||chart.created_at))}</span></div></button>`;
 }
 
 async function createChart(){
@@ -1163,9 +1166,11 @@ function syncFilters(){filterProjects=new Set([...filterProjects].filter(name=>p
 function getTaskStart(task){return task.startDate}
 function getTaskEnd(task){return task.endDate}
 function taskDuration(task){return Math.max(1,Math.floor((parseDate(getTaskEnd(task))-parseDate(getTaskStart(task)))/DAY_MS)+1)}
-function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start.slice(2):\`${'${'}start.slice(2)}→${'${'}end.slice(2)}\`}
-function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?start:\`${'${'}start} to ${'${'}end}\`}
-function filteredTasks(){let filtered=tasks.filter(task=>filterProjects.has(task.project));if(showDeliveryOnly)filtered=filtered.filter(task=>task.delivery);return filtered}
+function euD(iso){const p=iso.split('-');return p[2]+'/'+p[1]+'/'+p[0].slice(2);}
+function euDate(iso){const p=iso.split('-');return p[2]+'/'+p[1]+'/'+p[0];}
+function taskRangeLabel(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?euD(start):\`${'${'}euD(start)}→${'${'}euD(end)}\`}
+function taskFullRange(task){const start=getTaskStart(task),end=getTaskEnd(task);return start===end?euDate(start):\`${'${'}euDate(start)} to ${'${'}euDate(end)}\`}
+function filteredTasks(){let filtered=tasks.filter(task=>filterProjects.has(task.project));if(showDeliveryOnly)filtered=filtered.filter(task=>task.delivery);filtered.sort((a,b)=>getTaskStart(a).localeCompare(getTaskStart(b))||getTaskEnd(a).localeCompare(getTaskEnd(b))||a.task.localeCompare(b.task));return filtered}
 function dateWindow(){if(!tasks.length){const year=new Date().getUTCFullYear();const startDate=parseDate(\`${'${'}year}-01-01\`),endDate=parseDate(\`${'${'}year+1}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}const starts=tasks.map(task=>getTaskStart(task)).sort();const ends=tasks.map(task=>getTaskEnd(task)).sort();const startYear=parseDate(starts[0]).getUTCFullYear();const endYear=parseDate(ends[ends.length-1]).getUTCFullYear();const startDate=parseDate(\`${'${'}startYear}-01-01\`),endDate=parseDate(\`${'${'}endYear}-12-31\`);return{startDate,endDate,totalDays:Math.floor((endDate-startDate)/DAY_MS)+1}}
 function getMonths(startDate,endDate){const months=[];let year=startDate.getUTCFullYear(),month=startDate.getUTCMonth();while(Date.UTC(year,month,1)<=endDate.getTime()){const monthStart=new Date(Date.UTC(year,month,1)),nextStart=new Date(Date.UTC(year,month+1,1)),visibleStart=monthStart.getTime()<startDate.getTime()?startDate:monthStart,visibleEnd=nextStart.getTime()>endDate.getTime()?new Date(endDate.getTime()+DAY_MS):nextStart;months.push({label:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][month]+' '+year,days:Math.ceil((visibleEnd-visibleStart)/DAY_MS)});month+=1;if(month===12){month=0;year+=1}}return months}
 function dayOffset(ds,startDate){return Math.floor((parseDate(ds)-startDate)/DAY_MS)}
