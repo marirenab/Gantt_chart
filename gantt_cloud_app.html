@@ -230,6 +230,14 @@ function loadSupabaseConfig(){
     key:stored?.key||EMBEDDED_SUPABASE_CONFIG.key
   };
 }
+function describeFetchFailure(action,error){
+  const message=error?.message||String(error);
+  if(!/failed to fetch/i.test(message))return message;
+  if(window.location.protocol==='file:'){
+    return `${action} failed because the app is running from file://. Open it from an http://localhost server or a hosted URL so the browser can reach Supabase normally.`;
+  }
+  return `${action} failed because the browser could not reach Supabase. Check the Supabase URL/key and make sure this app URL is allowed in Supabase Auth settings.`;
+}
 const cloneDefaultProjects=()=>Object.fromEntries(DEFAULT_PROJECTS.map((project,index)=>[project.name,{...project,position:index}]));
 const app=document.getElementById('app');
 let supabaseConfig=loadSupabaseConfig();
@@ -271,7 +279,7 @@ async function init(){
     });
     if(user)await loadCharts();
   }catch(error){
-    flashMessage=`Could not connect to Supabase. ${error.message||error}`;
+    flashMessage=`Could not connect to Supabase. ${describeFetchFailure('Initial connection',error)}`;
   }finally{
     loading=false;
     render();
@@ -1166,7 +1174,7 @@ let tasks=(Array.isArray(state.tasks)?state.tasks:DATA.tasks||[]).map(normalizeT
 let filterProjects=new Set(Object.keys(projects));
 let showDeliveryOnly=false,editTask=null,exportPdfPromise=null;
 const app=document.getElementById('app');
-const ST_OPEN='\n\n<!-- gantt-subtasks: ',ST_CLOSE=' -->';
+const ST_OPEN='\\n\\n<!-- gantt-subtasks: ',ST_CLOSE=' -->';
 function parseSubtasksFromDesc(raw){const idx=(raw||'').indexOf(ST_OPEN);if(idx===-1)return{text:raw||'',subtasks:[]};try{const end=raw.lastIndexOf(ST_CLOSE);return{text:raw.slice(0,idx),subtasks:JSON.parse(raw.slice(idx+ST_OPEN.length,end))};}catch{return{text:raw||'',subtasks:[]};}}
 function encodeSubtasksInDesc(text,subtasks){const base=(text||'').trimEnd();if(!subtasks||!subtasks.length)return base;return base+ST_OPEN+JSON.stringify(subtasks)+ST_CLOSE;}
 let editSubtasks=[];
@@ -1347,8 +1355,13 @@ async function signIn(){
   flashMessage='';
   const email=document.getElementById('auth-email').value.trim().toLowerCase();
   const password=document.getElementById('auth-password').value;
-  const {error}=await supabase.auth.signInWithPassword({email,password});
-  if(error){flashMessage=error.message;render()}
+  try{
+    const {error}=await supabase.auth.signInWithPassword({email,password});
+    if(error)flashMessage=error.message;
+  }catch(error){
+    flashMessage=describeFetchFailure('Sign in',error);
+  }
+  render();
 }
 
 async function signUp(){
@@ -1356,8 +1369,12 @@ async function signUp(){
   const email=document.getElementById('auth-email').value.trim().toLowerCase();
   const password=document.getElementById('auth-password').value;
   const redirectTo=window.location.protocol==='http:'||window.location.protocol==='https:'?window.location.href:undefined;
-  const {error}=await supabase.auth.signUp({email,password,options:redirectTo?{emailRedirectTo:redirectTo}:{}}); 
-  flashMessage=error?error.message:'Account created. Check your email to verify the address, then sign in.';
+  try{
+    const {error}=await supabase.auth.signUp({email,password,options:redirectTo?{emailRedirectTo:redirectTo}:{}}); 
+    flashMessage=error?error.message:'Account created. Check your email to verify the address, then sign in.';
+  }catch(error){
+    flashMessage=describeFetchFailure('Sign up',error);
+  }
   render();
 }
 
@@ -1365,8 +1382,12 @@ async function sendReset(){
   flashMessage='';
   const email=document.getElementById('auth-email').value.trim().toLowerCase();
   const redirectTo=window.location.protocol==='http:'||window.location.protocol==='https:'?window.location.href:undefined;
-  const {error}=await supabase.auth.resetPasswordForEmail(email,redirectTo?{redirectTo}:{});
-  flashMessage=error?error.message:'Password reset email sent if that account exists.';
+  try{
+    const {error}=await supabase.auth.resetPasswordForEmail(email,redirectTo?{redirectTo}:{});
+    flashMessage=error?error.message:'Password reset email sent if that account exists.';
+  }catch(error){
+    flashMessage=describeFetchFailure('Password reset',error);
+  }
   render();
 }
 
